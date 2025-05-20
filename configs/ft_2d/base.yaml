@@ -1,0 +1,10 @@
+extends: LAGRANGEBENCH_DEFAULTS
+
+dataset:
+  src: datasets/FT2D_every250
+
+logging:
+  wandb_project: ft_2d
+
+neighbors:
+  multiplier: 2.0

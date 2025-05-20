@@ -1,0 +1,16 @@
+.*
+*__pycache__*
+cases/
+ckp/
+datasets/
+jax_setup/
+miniconda3/
+minio-binaries/
+rollout/
+tmp/
+temp/
+check.sh
+fetch_all_from_s3.py
+gpu_check.py
+initialSetup.sh
+untitled.py
