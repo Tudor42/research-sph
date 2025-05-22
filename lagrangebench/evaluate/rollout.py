@@ -412,4 +412,4 @@ def infer(
 def calculate_densities(features, particle_types, mass, n_nodes_max):
     raw_densities = jax.ops.segment_sum(mass * window_function_batched(features["rel_dist"]), features["senders"], n_nodes_max)[:, 0]
     mask = get_kinematic_mask(particle_types)
-    return jnp.where(mask, 0.0, raw_densities)
+    return jnp.where(mask, 1.0, raw_densities)

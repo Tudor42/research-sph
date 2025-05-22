@@ -135,8 +135,12 @@ class MetricsComputer:
                         ),
                     )[1]
                 elif metric_name == "rho_deviation":
-                    metrics[metric_name] = jnp.sqrt(jnp.mean(densities - 1)**2, axis=1)
+                    metrics[metric_name] = jnp.sqrt(jnp.mean(densities - 1, axis=1)**2)
         return metrics
+
+    @partial(jax.jit, static_argnums=(0,))
+    def rho_deviation(self, densities) -> float:
+        jnp.sqrt(jnp.mean(densities - 1, axis=1)**2)
 
     @partial(jax.jit, static_argnums=(0,))
     def mse(self, pred: jnp.ndarray, target: jnp.ndarray) -> float:
