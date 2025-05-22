@@ -131,6 +131,7 @@ class MyParticleNetwork(BaseModel):
     def __init__(
         self,
         displ_fn,
+        shift_fn,
         kernel_size=(4,4),
         radius: float = 0.025,
         timestep: float = 1/50,
@@ -139,6 +140,7 @@ class MyParticleNetwork(BaseModel):
     ):
         super().__init__(name=name)
         self.disp_fn = displ_fn
+        self.shift_fn = shift_fn
         self.layer_channels = [32, 64, 128, 64, 2]
         self.kernel_size = tuple(kernel_size)
         self.radius = radius
@@ -198,7 +200,7 @@ class MyParticleNetwork(BaseModel):
                         vel1)                       # shape (N, dim)
 
         # now do the position update
-        pos2_candidate = pos1 + dt * (vel2 + vel1) / 2.0   # shape (N, dim)
+        pos2_candidate = self.shift_fn(pos1, dt * (vel2 + vel1) / 2.0)   # shape (N, dim)
         pos2 = jnp.where(mask[:, None],
                         pos2_candidate,
                         pos1)                        # shape (N, dim)
@@ -217,10 +219,7 @@ class MyParticleNetwork(BaseModel):
         
         senders, receivers = features["senders"], features["receivers"]
         
-        if self.displ_fn is not None:
-            rel_pos = jax.vmap(self.displ_fn)(pos2["senders"], features["receivers"]) / self.radius
-        else:
-            rel_pos = -features["rel_disp"]
+        rel_pos = self.displ_fn(pos2["senders"], features["receivers"]) / self.radius
         
         fw_mask = ((particle_types[senders] == Tag.MOVING_WALL) | (particle_types[senders] == Tag.SOLID_WALL) | (particle_types[senders] == Tag.DIRICHLET_WALL)) & (particle_types[receivers] == Tag.FLUID)
         ff_mask = (particle_types[senders] == Tag.FLUID) & (particle_types[receivers] == Tag.FLUID)

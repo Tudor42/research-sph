@@ -289,11 +289,20 @@ def setup_model(
 
         MODEL = models.Linear
     elif model_name == "cconv":
+        box = cfg.box
+        if jnp.array(metadata["periodic_boundary_conditions"]).any():
+            displacement_fn, shift_fn = space.periodic(jnp.array(box))
+        else:
+            displacement_fn, shift_fn = space.free()
+
+        displacement_fn = jax.vmap(displacement_fn, in_axes=(0, 0))
+        shift_fn = jax.vmap(shift_fn, in_axes=(0, 0))
+
         num_particles_max = metadata["num_particles_max"]
         dt_coarse = metadata["write_every"] * metadata["dt"]
         radius = metadata["default_connectivity_radius"]
         def model_fn(x):
-            return models.MyParticleNetwork(timestep=dt_coarse, radius=radius, num_particles=num_particles_max)(x)
+            return models.MyParticleNetwork(displacement_fn, shift_fn, timestep=dt_coarse, radius=radius, num_particles=num_particles_max)(x)
         MODEL = models.MyParticleNetwork
 
     return model_fn, MODEL
