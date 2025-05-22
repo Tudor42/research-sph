@@ -139,7 +139,7 @@ class MyParticleNetwork(BaseModel):
         name=None,
     ):
         super().__init__(name=name)
-        self.disp_fn = displ_fn
+        self.displ_fn = displ_fn
         self.shift_fn = shift_fn
         self.layer_channels = [32, 64, 128, 64, 2]
         self.kernel_size = tuple(kernel_size)
