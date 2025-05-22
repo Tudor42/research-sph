@@ -57,7 +57,7 @@ class CaseSetupFn:
     integrate: IntegrateFn = static_field()
     displacement: space.DisplacementFn = static_field()
     normalization_stats: Dict = static_field()
-    neighbor_fn: NeighborFn = static_field()
+    metadata: Dict = static_field()
 
 
 def case_builder(
@@ -268,5 +268,5 @@ def case_builder(
         integrate_fn,
         displacement_fn,
         normalization_stats,
-        neighbor_fn
+        metadata
     )

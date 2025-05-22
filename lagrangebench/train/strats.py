@@ -156,6 +156,11 @@ def push_forward_build(model_apply, case):
         features, neighbors = case.preprocess_eval(
             (current_pos, particle_type, time_frames), neighbors
         )
+        # --- shift the time_frames window forward by dt_coarse ---
+        dt_coarse = case.metadata["dt"] * case.metadata["write_every"]
+        last_t = time_frames[:, -1:]                           
+        new_t  = last_t + dt_coarse                            
+        time_frames = jnp.concatenate([time_frames[:, 1:], new_t], axis=1)
         return current_pos, neighbors, features
 
     return push_forward_fn

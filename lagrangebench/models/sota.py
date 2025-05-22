@@ -130,6 +130,7 @@ class MyParticleNetwork(BaseModel):
     """
     def __init__(
         self,
+        displ_fn,
         kernel_size=(4,4),
         radius: float = 0.025,
         timestep: float = 1/50,
@@ -137,9 +138,10 @@ class MyParticleNetwork(BaseModel):
         name=None,
     ):
         super().__init__(name=name)
+        self.disp_fn = displ_fn
         self.layer_channels = [32, 64, 128, 64, 2]
         self.kernel_size = tuple(kernel_size)
-        self.filter_extent = radius * 2
+        self.radius = radius
         self.timestep = timestep
         self.num_particles = num_particles
         def ConvLayer(in_ch, out_ch, conv_type='cconv'):
@@ -214,46 +216,50 @@ class MyParticleNetwork(BaseModel):
         box_feat = jnp.concatenate([pos2, vel2], axis=-1)
         
         senders, receivers = features["senders"], features["receivers"]
-        rel_pos = features["rel_disp"]
+        
+        if self.displ_fn is not None:
+            rel_pos = jax.vmap(self.displ_fn)(pos2["senders"], features["receivers"]) / self.radius
+        else:
+            rel_pos = -features["rel_disp"]
         
         fw_mask = ((particle_types[senders] == Tag.MOVING_WALL) | (particle_types[senders] == Tag.SOLID_WALL) | (particle_types[senders] == Tag.DIRICHLET_WALL)) & (particle_types[receivers] == Tag.FLUID)
         ff_mask = (particle_types[senders] == Tag.FLUID) & (particle_types[receivers] == Tag.FLUID)
 
-        a_fw = jnp.where(fw_mask, window_function_batched(jnp.linalg.norm(rel_pos, ord=2, axis=1) / self.filter_extent), jnp.array(0.0, dtype=rel_pos.dtype))
-        a_ff = jnp.where(ff_mask, window_function_batched(jnp.linalg.norm(rel_pos, ord=2, axis=1) / self.filter_extent), jnp.array(0.0, dtype=rel_pos.dtype))
+        a_fw = jnp.where(fw_mask, window_function_batched(jnp.linalg.norm(rel_pos, ord=2, axis=1) / self.radius), jnp.array(0.0, dtype=rel_pos.dtype))
+        a_ff = jnp.where(ff_mask, window_function_batched(jnp.linalg.norm(rel_pos, ord=2, axis=1) / self.radius), jnp.array(0.0, dtype=rel_pos.dtype))
         # first conv0
-        ans_f = self.conv0_fluid(fluid_feats[senders], receivers, rel_pos, self.filter_extent, a=a_ff)
+        ans_f = self.conv0_fluid(fluid_feats[senders], receivers, rel_pos, self.radius, a=a_ff)
         ans_d = self.dense0_fluid(fluid_feats)
-        obs_f = self.conv0_obstacle(box_feat[senders], receivers, rel_pos, self.filter_extent, a=a_fw)
-        hybrid = self.aff_cconv(ans_f, obs_f, senders, receivers, rel_pos, self.filter_extent, a=a_ff)
+        obs_f = self.conv0_obstacle(box_feat[senders], receivers, rel_pos, self.radius, a=a_fw)
+        hybrid = self.aff_cconv(ans_f, obs_f, senders, receivers, rel_pos, self.radius, a=a_ff)
         feats = jnp.concatenate([hybrid, ans_d], axis=-1)
         
         # ascc
-        ans_f_ascc = self.conv0_fluid_ascc(fluid_feats[senders], receivers, rel_pos, self.filter_extent, a=a_ff)
+        ans_f_ascc = self.conv0_fluid_ascc(fluid_feats[senders], receivers, rel_pos, self.radius, a=a_ff)
         ans_d_ascc = self.dense0_fluid_ascc(fluid_feats)
-        obs_f_ascc = self.conv0_obstacle_ascc(box_feat[senders], receivers, rel_pos, self.filter_extent, a=a_fw)
-        hybrid_ascc = self.aff_ascc(ans_f_ascc, obs_f_ascc, senders, receivers, rel_pos, self.filter_extent, a=a_ff)
+        obs_f_ascc = self.conv0_obstacle_ascc(box_feat[senders], receivers, rel_pos, self.radius, a=a_fw)
+        hybrid_ascc = self.aff_ascc(ans_f_ascc, obs_f_ascc, senders, receivers, rel_pos, self.radius, a=a_ff)
         feats_ascc = jnp.concatenate([hybrid_ascc, ans_d_ascc], axis=-1)
 
-        feats_select = self.aff0(feats, feats_ascc, senders, receivers, rel_pos, self.filter_extent, a=a_ff)
+        feats_select = self.aff0(feats, feats_ascc, senders, receivers, rel_pos, self.radius, a=a_ff)
 
         ans_convs = [feats_select]
 
         for conv_cconv, dense_cconv, conv_ascc, dense_ascc, aff in zip(self.convs, self.denses, self.convs_ascc, self.denses_ascc, self.affs):
             inp_feats = jax.nn.relu(ans_convs[-1])
             #cconv
-            ans_conv_cconv = conv_cconv(inp_feats[senders], receivers, rel_pos, self.filter_extent, a=a_ff)
+            ans_conv_cconv = conv_cconv(inp_feats[senders], receivers, rel_pos, self.radius, a=a_ff)
             ans_dense_cconv = dense_cconv(inp_feats)
             ans_cconv = ans_conv_cconv + ans_dense_cconv
             #ascc
-            ans_conv_ascc = conv_ascc(inp_feats[senders], receivers, rel_pos, self.filter_extent, a=a_ff)
+            ans_conv_ascc = conv_ascc(inp_feats[senders], receivers, rel_pos, self.radius, a=a_ff)
             ans_dense_ascc = dense_ascc(inp_feats)
             ans_ascc = ans_conv_ascc + ans_dense_ascc
             #aff
-            ans_select = aff(ans_cconv, ans_ascc, senders, receivers, rel_pos, self.filter_extent, a=a_ff)
+            ans_select = aff(ans_cconv, ans_ascc, senders, receivers, rel_pos, self.radius, a=a_ff)
             #ResAFF
             if len(ans_convs) == 3 and ans_dense_cconv.shape[-1] == ans_convs[-2].shape[-1]:
-                ans_select = self.resAff(ans_select, ans_convs[-2], senders, receivers, rel_pos, self.filter_extent, a=a_ff)
+                ans_select = self.resAff(ans_select, ans_convs[-2], senders, receivers, rel_pos, self.radius, a=a_ff)
             ans_convs.append(ans_select)
         
         return {"acc": ans_convs[-1] / 128.0}

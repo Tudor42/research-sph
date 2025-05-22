@@ -25,7 +25,7 @@ class MetricsComputer:
     * Kinetic energy, physical quantity of interest
     """
 
-    METRICS = ["mse", "mae", "sinkhorn", "e_kin"]
+    METRICS = ["mse", "mae", "sinkhorn", "e_kin", "rho_deviation"]
 
     def __init__(
         self,
@@ -134,7 +134,14 @@ class MetricsComputer:
                             target_rollout[0 :: self._stride],
                         ),
                     )[1]
+                elif metric_name == "rho_deviation":
+                    pass
         return metrics
+
+    @partial(jax.jit, static_argnums=(0,2,))
+    def rho_deviation(self, pred: jnp.ndarray, total_num_particles) -> float:
+        """Compute density deviation for particles per prediction"""
+        return
 
     @partial(jax.jit, static_argnums=(0,))
     def mse(self, pred: jnp.ndarray, target: jnp.ndarray) -> float:
@@ -172,7 +179,7 @@ class MetricsComputer:
             # uniform weights
             a=jnp.ones((pred.shape[0],)) / pred.shape[0],
             b=jnp.ones((target.shape[0],)) / target.shape[0],
-            sinkhorn_kwargs={"threshold": 1e-4},
+            solve_kwargs={"threshold": 1e-4},
         ).divergence
 
     def _sinkhorn_pot(self, pred: jnp.ndarray, target: jnp.ndarray):

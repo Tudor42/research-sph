@@ -141,7 +141,11 @@ class Trainer:
         self.cfg_train = OmegaConf.merge(defaults.train, cfg_train)
         self.cfg_eval = OmegaConf.merge(defaults.eval, cfg_eval)
         self.cfg_logging = OmegaConf.merge(defaults.logging, cfg_logging)
-
+        
+        dt_raw       = case.metadata["dt"]
+        write_every  = case.metadata.get("write_every", 1)
+        self.dt           = dt_raw * write_every 
+        
         assert isinstance(
             model, hk.TransformedWithState
         ), "Model must be passed as an Haiku transformed function."
@@ -336,14 +340,15 @@ class Trainer:
                 )
                 # unroll for push-forward steps
                 _current_pos = raw_batch[0][:, :, : self.input_seq_length]
+                time_steps = raw_batch[2]
                 for _ in range(unroll_steps):
                     if neighbors_batch.did_buffer_overflow.sum() > 0:
                         break
-                    _current_pos, neighbors_batch, features_batch = push_forward_vmap(
+                    _current_pos, neighbors_batch, features_batch, time_steps = push_forward_vmap(
                         features_batch,
                         _current_pos,
                         raw_batch[1],
-                        raw_batch[2],
+                        time_steps,
                         neighbors_batch,
                         params,
                         state,
@@ -401,6 +406,7 @@ class Trainer:
                         n_trajs=cfg_eval.train.n_trajs,
                         rollout_dir=cfg_eval.rollout_dir,
                         out_type=cfg_eval.train.out_type,
+                        dt_coarse=self.dt
                     )
 
                     metrics = averaged_metrics(eval_metrics)

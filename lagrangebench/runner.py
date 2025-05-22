@@ -63,7 +63,6 @@ def train_or_infer(cfg: Union[Dict, DictConfig]):
         homogeneous_particles=particle_type.max() == particle_type.min(),
         has_external_force=data_train.external_force_fn is not None,
         normalization_stats=case.normalization_stats,
-        neighbor_fn=case.neighbor_fn
     )
     model = hk.without_apply_rng(hk.transform_with_state(model))
 
@@ -196,7 +195,6 @@ def setup_model(
     homogeneous_particles: bool = False,
     has_external_force: bool = False,
     normalization_stats: Optional[Dict] = None,
-    neighbor_fn = None
 ) -> Tuple[Callable, Type]:
     """Setup model based on cfg."""
     model_name = cfg.model.name.lower()

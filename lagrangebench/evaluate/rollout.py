@@ -115,6 +115,7 @@ def _eval_batched_rollout(
         n_rollout_steps = pos_input_batch.shape[2] - t_window
 
     current_positions_batch = pos_input_batch[:, :, 0:t_window]
+
     # (batch, n_nodes, t_window, dim)
     traj_len = n_rollout_steps + n_extrap_steps
     target_positions_batch = pos_input_batch[:, :, t_window : t_window + traj_len]
@@ -124,7 +125,9 @@ def _eval_batched_rollout(
 
     step = 0
     while step < n_rollout_steps + n_extrap_steps:
-        sample_batch = (current_positions_batch, particle_type_batch, times_batch)
+        current_time = times_batch[:, step:step+t_window]
+
+        sample_batch = (current_positions_batch, particle_type_batch, current_time)
 
         # 1. preprocess features
         features_batch, neighbors_batch = preprocess_eval_vmap(
@@ -225,7 +228,7 @@ def eval_rollout(
     )
     forward_eval_vmap = vmap(forward_eval, in_axes=(None, None, 0, 0, 0))
     preprocess_eval_vmap = vmap(case.preprocess_eval, in_axes=(0, 0))
-    metrics_computer_vmap = vmap(metrics_computer, in_axes=(0, 0))
+    metrics_computer_vmap = vmap(metrics_computer, in_axes=(0, 0, 0))
 
     for i, traj_batch_i in enumerate(loader_eval):
         # if n_trajs is not a multiple of batch_size, we slice from the last batch
