@@ -219,7 +219,7 @@ class MyParticleNetwork(BaseModel):
         
         senders, receivers = features["senders"], features["receivers"]
         
-        rel_pos = self.displ_fn(pos2["senders"], features["receivers"]) / self.radius
+        rel_pos = self.displ_fn(pos2[senders], pos2[receivers]) / self.radius
         
         fw_mask = ((particle_types[senders] == Tag.MOVING_WALL) | (particle_types[senders] == Tag.SOLID_WALL) | (particle_types[senders] == Tag.DIRICHLET_WALL)) & (particle_types[receivers] == Tag.FLUID)
         ff_mask = (particle_types[senders] == Tag.FLUID) & (particle_types[receivers] == Tag.FLUID)
