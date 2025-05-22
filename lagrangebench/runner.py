@@ -63,6 +63,7 @@ def train_or_infer(cfg: Union[Dict, DictConfig]):
         homogeneous_particles=particle_type.max() == particle_type.min(),
         has_external_force=data_train.external_force_fn is not None,
         normalization_stats=case.normalization_stats,
+        case=case,
     )
     model = hk.without_apply_rng(hk.transform_with_state(model))
 
@@ -191,6 +192,7 @@ def setup_data(cfg) -> Tuple[H5Dataset, H5Dataset, H5Dataset]:
 
 def setup_model(
     cfg,
+    case,
     metadata: Dict,
     homogeneous_particles: bool = False,
     has_external_force: bool = False,
@@ -289,14 +291,8 @@ def setup_model(
 
         MODEL = models.Linear
     elif model_name == "cconv":
-        box = cfg.box
-        if jnp.array(metadata["periodic_boundary_conditions"]).any():
-            displacement_fn, shift_fn = space.periodic(jnp.array(box))
-        else:
-            displacement_fn, shift_fn = space.free()
-
-        displacement_fn = jax.vmap(displacement_fn, in_axes=(0, 0))
-        shift_fn = jax.vmap(shift_fn, in_axes=(0, 0))
+        displacement_fn = jax.vmap(case.displacement, in_axes=(0, 0))
+        shift_fn = jax.vmap(case.shift, in_axes=(0, 0))
 
         num_particles_max = metadata["num_particles_max"]
         dt_coarse = metadata["write_every"] * metadata["dt"]
