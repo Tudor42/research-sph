@@ -126,7 +126,7 @@ def set_defaults(cfg: DictConfig = OmegaConf.create({})) -> DictConfig:
     # batch size
     cfg.eval.train.batch_size = 1
     # metrics to evaluate
-    cfg.eval.train.metrics = ["mse"]
+    cfg.eval.train.metrics = ["mse", "rho_deviation"]
     # write validation rollouts. One of "none", "vtk", or "pkl"
     cfg.eval.train.out_type = "none"
 
@@ -140,7 +140,7 @@ def set_defaults(cfg: DictConfig = OmegaConf.create({})) -> DictConfig:
     # batch size
     cfg.eval.infer.batch_size = 2
     # metrics for inference
-    cfg.eval.infer.metrics = ["mse", "e_kin", "sinkhorn"]
+    cfg.eval.infer.metrics = ["mse", "e_kin", "sinkhorn", "rho_deviation"]
     # write inference rollouts. One of "none", "vtk", or "pkl"
     cfg.eval.infer.out_type = "pkl"
 
@@ -198,7 +198,7 @@ def check_cfg(cfg: DictConfig):
 
     assert cfg.eval.train.n_trajs >= -1
     assert cfg.eval.infer.n_trajs >= -1
-    assert set(cfg.eval.train.metrics).issubset(["mse", "e_kin", "sinkhorn"])
-    assert set(cfg.eval.infer.metrics).issubset(["mse", "e_kin", "sinkhorn"])
+    assert set(cfg.eval.train.metrics).issubset(["mse", "e_kin", "sinkhorn", "rho_deviation"])
+    assert set(cfg.eval.infer.metrics).issubset(["mse", "e_kin", "sinkhorn", "rho_deviation"])
     assert cfg.eval.train.out_type in ["none", "vtk", "pkl"]
     assert cfg.eval.infer.out_type in ["none", "vtk", "pkl"]

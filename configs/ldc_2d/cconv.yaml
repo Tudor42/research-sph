@@ -1,0 +1,9 @@
+extends: configs/ldc_2d/base.yaml
+
+model: 
+  name: cconv
+  input_seq_length: 3
+train:
+  noise_std: 0.001
+  optimizer:
+    lr_start: 5.e-4

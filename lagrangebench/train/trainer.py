@@ -406,7 +406,6 @@ class Trainer:
                         n_trajs=cfg_eval.train.n_trajs,
                         rollout_dir=cfg_eval.rollout_dir,
                         out_type=cfg_eval.train.out_type,
-                        dt_coarse=self.dt
                     )
 
                     metrics = averaged_metrics(eval_metrics)

@@ -26,7 +26,8 @@ from lagrangebench.utils import (
     load_haiku,
     set_seed,
 )
-
+from ..utils_extra.continous_convolution import window_function_batched
+from ..utils import get_kinematic_mask
 
 @partial(jit, static_argnames=["model_apply", "case_integrate"])
 def _forward_eval(
@@ -121,8 +122,11 @@ def _eval_batched_rollout(
     target_positions_batch = pos_input_batch[:, :, t_window : t_window + traj_len]
 
     predictions_batch = jnp.zeros((current_batch_size, traj_len, n_nodes_max, dim))
+    densities_batch = jnp.zeros((current_batch_size, traj_len, n_nodes_max))
     neighbors_batch = broadcast_to_batch(neighbors, current_batch_size)
 
+    calculate_densities_batched = jax.vmap(calculate_densities, in_axes=(0, 0, None, None))
+    mass_particle = case.metadata["dx"] ** case.metadata["dim"]
     step = 0
     while step < n_rollout_steps + n_extrap_steps:
         current_time = times_batch[:, step:step+t_window]
@@ -152,6 +156,10 @@ def _eval_batched_rollout(
             # To run the loop N times even if sometimes
             # did_buffer_overflow > 0 we directly return to the beginning
             continue
+        
+        densities_batch = densities_batch.at[:, step].set(
+            calculate_densities_batched(features_batch, particle_type_batch, mass_particle, n_nodes_max)
+        )
 
         # 3. run forward model
         current_positions_batch, state_batch = forward_eval_vmap(
@@ -175,7 +183,7 @@ def _eval_batched_rollout(
     target_positions_batch = target_positions_batch.transpose(0, 2, 1, 3)
     # slice out extrapolation steps
     metrics_batch = metrics_computer_vmap(
-        predictions_batch[:, :n_rollout_steps, :, :], target_positions_batch
+        predictions_batch[:, :n_rollout_steps, :, :], target_positions_batch, densities_batch[:, :n_rollout_steps, :]
     )
 
     return (predictions_batch, metrics_batch, broadcast_from_batch(neighbors_batch, 0))
@@ -400,3 +408,8 @@ def infer(
         n_extrap_steps=cfg_eval_infer.n_extrap_steps,
     )
     return eval_metrics
+
+def calculate_densities(features, particle_types, mass, n_nodes_max):
+    raw_densities = jax.ops.segment_sum(mass * window_function_batched(features["rel_dist"]), features["senders"], n_nodes_max)[:, 0]
+    mask = get_kinematic_mask(particle_types)
+    return jnp.where(mask, 0.0, raw_densities)

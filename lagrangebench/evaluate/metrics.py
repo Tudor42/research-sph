@@ -67,7 +67,7 @@ class MetricsComputer:
         self.ot_backend = ot_backend
 
     def __call__(
-        self, pred_rollout: jnp.ndarray, target_rollout: jnp.ndarray
+        self, pred_rollout: jnp.ndarray, target_rollout: jnp.ndarray, densities: jnp.ndarray
     ) -> MetricsDict:
         """Compute the metrics between two rollouts.
 
@@ -135,13 +135,8 @@ class MetricsComputer:
                         ),
                     )[1]
                 elif metric_name == "rho_deviation":
-                    pass
+                    metrics[metric_name] = jnp.sqrt(jnp.mean(densities - 1)**2, axis=1)
         return metrics
-
-    @partial(jax.jit, static_argnums=(0,2,))
-    def rho_deviation(self, pred: jnp.ndarray, total_num_particles) -> float:
-        """Compute density deviation for particles per prediction"""
-        return
 
     @partial(jax.jit, static_argnums=(0,))
     def mse(self, pred: jnp.ndarray, target: jnp.ndarray) -> float:
@@ -179,7 +174,7 @@ class MetricsComputer:
             # uniform weights
             a=jnp.ones((pred.shape[0],)) / pred.shape[0],
             b=jnp.ones((target.shape[0],)) / target.shape[0],
-            solve_kwargs={"threshold": 1e-4},
+            sinkhorn_kwargs={"threshold": 1e-4},
         ).divergence
 
     def _sinkhorn_pot(self, pred: jnp.ndarray, target: jnp.ndarray):
@@ -233,7 +228,7 @@ class MetricsComputer:
                 return jnp.sqrt(dist(a, b))
 
         return jnp.array(
-            jax.vmap(lambda a: jax.vmap(lambda b: dist(a, b))(y))(x), dtype=jnp.float32
+            jax.vmap(lambda a: jax.vmap(lambda b: dist(a, b))(y))(x), dtype=x.dtype
         )
 
 

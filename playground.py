@@ -1,0 +1,2 @@
+from lagrangebench.utils_extra.continous_convolution import window_function_batched
+import jax
