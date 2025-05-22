@@ -161,6 +161,6 @@ def push_forward_build(model_apply, case):
         last_t = time_frames[:, -1:]                           
         new_t  = last_t + dt_coarse                            
         time_frames = jnp.concatenate([time_frames[:, 1:], new_t], axis=1)
-        return current_pos, neighbors, features
+        return current_pos, neighbors, features, time_frames
 
     return push_forward_fn
