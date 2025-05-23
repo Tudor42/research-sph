@@ -157,10 +157,12 @@ def push_forward_build(model_apply, case):
             (current_pos, particle_type, time_frames), neighbors
         )
         # --- shift the time_frames window forward by dt_coarse ---
+        # jax.debug.print("time_Shape={x}", x=time_frames.shape)
         dt_coarse = case.metadata["dt"] * case.metadata["write_every"]
-        last_t = time_frames[:, -1:]                           
-        new_t  = last_t + dt_coarse                            
-        time_frames = jnp.concatenate([time_frames[:, 1:], new_t], axis=1)
+        last_t = time_frames[-1]                           
+        new_t  = last_t + dt_coarse
+        new_t = new_t[None]
+        time_frames = jnp.concatenate([time_frames[1:], new_t], axis=0)
         return current_pos, neighbors, features, time_frames
 
     return push_forward_fn

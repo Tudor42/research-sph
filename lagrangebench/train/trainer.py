@@ -344,6 +344,7 @@ class Trainer:
                 for _ in range(unroll_steps):
                     if neighbors_batch.did_buffer_overflow.sum() > 0:
                         break
+                    # jax.debug.print("time_steps.shape={x}", x=time_steps.shape)
                     _current_pos, neighbors_batch, features_batch, time_steps = push_forward_vmap(
                         features_batch,
                         _current_pos,
