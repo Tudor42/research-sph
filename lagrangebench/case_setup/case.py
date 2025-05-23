@@ -7,9 +7,10 @@ import jax.numpy as jnp
 from jax import Array, jit, lax, vmap
 from jax_sph.jax_md import space
 from jax_sph.jax_md.dataclasses import dataclass, static_field
-from jax_sph.jax_md.partition import NeighborList, NeighborListFormat, NeighborFn, neighbor_list
+from jax_sph.jax_md.partition import NeighborList, NeighborListFormat, neighbor_list
 from omegaconf import DictConfig, OmegaConf
 
+from jax_sph.kernel import BaseKernel, QuinticKernel
 from lagrangebench.data.utils import get_dataset_stats
 from lagrangebench.defaults import defaults
 from lagrangebench.train.strats import add_gns_noise
@@ -59,7 +60,7 @@ class CaseSetupFn:
     shift: space.ShiftFn = static_field()
     normalization_stats: Dict = static_field()
     metadata: Dict = static_field()
-
+    kernel: BaseKernel = static_field()
 
 def case_builder(
     box: Tuple[float, float, float],
@@ -270,5 +271,6 @@ def case_builder(
         displacement_fn,
         shift_fn,
         normalization_stats,
-        metadata
+        metadata,
+        QuinticKernel(h=metadata["dx"], dim=metadata["dim"])
     )

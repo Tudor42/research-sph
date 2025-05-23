@@ -28,6 +28,7 @@ from lagrangebench.utils import (
 )
 from ..utils_extra.continous_convolution import window_function_batched
 from ..utils import get_kinematic_mask
+from jax_sph.kernel import QuinticKernel
 
 @partial(jit, static_argnames=["model_apply", "case_integrate"])
 def _forward_eval(
@@ -121,11 +122,14 @@ def _eval_batched_rollout(
     traj_len = n_rollout_steps + n_extrap_steps
     target_positions_batch = pos_input_batch[:, :, t_window : t_window + traj_len]
 
+    radius = case.metadata["default_connectivity_radius"]
+    kernel  = case.kernel.w
+
     predictions_batch = jnp.zeros((current_batch_size, traj_len, n_nodes_max, dim))
     densities_batch = jnp.zeros((current_batch_size, traj_len, n_nodes_max))
     neighbors_batch = broadcast_to_batch(neighbors, current_batch_size)
-
-    calculate_densities_batched = jax.vmap(calculate_densities, in_axes=(0, 0, None, None))
+    
+    calculate_densities_batched = jax.vmap(calculate_densities, in_axes=(0, 0, None, None, None, None))
     mass_particle = case.metadata["dx"] ** case.metadata["dim"]
     step = 0
     while step < n_rollout_steps + n_extrap_steps:
@@ -158,7 +162,7 @@ def _eval_batched_rollout(
             continue
         
         densities_batch = densities_batch.at[:, step].set(
-            calculate_densities_batched(features_batch, particle_type_batch, mass_particle, n_nodes_max)
+            calculate_densities_batched(features_batch, particle_type_batch, kernel, radius, mass_particle, n_nodes_max)
         )
 
         # 3. run forward model
@@ -409,7 +413,7 @@ def infer(
     )
     return eval_metrics
 
-def calculate_densities(features, particle_types, mass, n_nodes_max):
-    raw_densities = jax.ops.segment_sum(mass * window_function_batched(features["rel_dist"]), features["senders"], n_nodes_max)[:, 0]
+def calculate_densities(features, particle_types, kernel, con_radius, mass, n_nodes_max):
+    raw_densities = jax.ops.segment_sum(mass * kernel(con_radius * features["rel_dist"]), features["senders"], n_nodes_max)[:, 0]
     mask = get_kinematic_mask(particle_types)
     return jnp.where(mask, 1.0, raw_densities)

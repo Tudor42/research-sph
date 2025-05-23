@@ -103,11 +103,17 @@ def train_or_infer(cfg: Union[Dict, DictConfig]):
             seed=cfg.seed,
         )
 
+        if "vel_div_loss" in cfg.model:
+            vel_div_loss = cfg.model["vel_div_loss"]
+        else: 
+            vel_div_loss = False
+        
         _, _, _ = trainer.train(
             step_max=cfg.train.step_max,
             load_ckp=load_ckp,
             store_ckp=store_ckp,
             wandb_config=wandb_config,
+            vel_div_loss=vel_div_loss
         )
 
     if mode == "infer" or mode == "all":
@@ -204,7 +210,6 @@ def setup_model(
     magnitude_features = cfg.model.magnitude_features
 
     if model_name == "gns":
-
         def model_fn(x):
             return models.GNS(
                 particle_dimension=metadata["dim"],

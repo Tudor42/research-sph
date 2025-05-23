@@ -7,7 +7,6 @@ import jax.numpy as jnp
 
 class BaseModel(hk.Module, ABC):
     """Base model class. All models must inherit from this class."""
-
     @abstractmethod
     def __call__(
         self, sample: Tuple[Dict[str, jnp.ndarray], jnp.ndarray]

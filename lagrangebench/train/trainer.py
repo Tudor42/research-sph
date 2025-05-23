@@ -32,7 +32,7 @@ from lagrangebench.utils import (
 from .strats import push_forward_build, push_forward_sample_steps
 
 
-@partial(jax.jit, static_argnames=["model_fn", "loss_weight"])
+@partial(jax.jit, static_argnames=["model_fn", "loss_weight", "vel_div_loss"])
 def _mse(
     params: hk.Params,
     state: hk.State,
@@ -41,10 +41,13 @@ def _mse(
     target: jnp.ndarray,
     model_fn: Callable,
     loss_weight: Dict[str, float],
+    case,
+    vel_div_loss = False,
 ):
     pred, state = model_fn(params, state, (features, particle_type))
     # check active (non zero) output shapes
     assert all(target[k].shape == pred[k].shape for k in pred)
+
     # particle mask
     non_kinematic_mask = jnp.logical_not(get_kinematic_mask(particle_type))
     num_non_kinematic = non_kinematic_mask.sum()
@@ -56,7 +59,38 @@ def _mse(
     total_loss = jnp.array(losses).sum(0)
     total_loss = jnp.where(non_kinematic_mask, total_loss, 0)
     total_loss = total_loss.sum() / num_non_kinematic
+    mass = case.metadata["dx"] ** case.metadata["dim"]
 
+    def w(x, y):
+        return case.kernel.w(jnp.linalg.norm(jnp.array([x, y]), ord=case.metadata["dim"], axis=0))
+    grad_w_x = jax.grad(w, argnums=0)
+    grad_w_y = jax.grad(w, argnums=1)
+
+    if vel_div_loss:
+        new_pos = case.integrate(pred, features["abs_pos"])
+        displacements = jax.vmap(case.displacement, in_axes=(0, 0))(new_pos[features["senders"]], new_pos[features["receivers"]])
+        dists = jnp.linalg.norm(displacements, ord=case.metadata["dim"], axis=1)
+        
+        dwdx = jax.vmap(lambda r: grad_w_x(r[0], r[1]))(displacements)
+        dwdy = jax.vmap(lambda r: grad_w_y(r[0], r[1]))(displacements)
+        grads = jnp.stack([dwdx, dwdy], axis=1)
+        vels_pred = new_pos - features["abs_pos"][:, -1]
+        vel_difs = vels_pred[features["senders"]] - vels_pred[features["receivers"]]
+
+        div_e = jnp.sum(grads * vel_difs, axis=1) 
+        densities = jax.ops.segment_sum(mass * jax.vmap(case.kernel.w)(dists), features["receivers"], num_segments=case.metadata["num_particles_max"])
+        div_e = mass * div_e / densities[features["senders"]]
+        div_e = jnp.nan_to_num(div_e, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        mask = jnp.logical_not(get_kinematic_mask(particle_type))
+
+        div_vel = jnp.where(mask, jax.ops.segment_sum(div_e, features["receivers"], num_segments=case.metadata["num_particles_max"]), 0.0)
+        
+        num_fluids = jnp.sum((mask))
+
+        mean_valid = jnp.where(num_fluids > 0, jnp.sum(div_vel**2) / num_fluids, 0.0)
+        total_loss += mean_valid
+        
     return total_loss, state
 
 
@@ -219,6 +253,7 @@ class Trainer:
         store_ckp: Optional[str] = None,
         load_ckp: Optional[str] = None,
         wandb_config: Optional[Dict] = None,
+        vel_div_loss = False,
     ) -> Tuple[hk.Params, hk.State, optax.OptState]:
         """
         Training loop.
@@ -253,7 +288,7 @@ class Trainer:
         model_apply = jax.jit(model.apply)
 
         # loss and update functions
-        loss_fn = jax.jit(partial(_mse, model_fn=model_apply, loss_weight=self.loss_weight))
+        loss_fn = jax.jit(partial(_mse, model_fn=model_apply, loss_weight=self.loss_weight, case=case, vel_div_loss=vel_div_loss))
         update_fn = jax.jit(partial(_update, loss_fn=loss_fn, opt_update=self.opt_update))
 
         # init values
