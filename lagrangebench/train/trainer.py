@@ -68,28 +68,35 @@ def _mse(
 
     if vel_div_loss:
         new_pos = case.integrate(pred, features["abs_pos"])
+
         displacements = jax.vmap(case.displacement, in_axes=(0, 0))(new_pos[features["senders"]], new_pos[features["receivers"]])
         dists = jnp.linalg.norm(displacements, ord=case.metadata["dim"], axis=1)
         
         dwdx = jax.vmap(lambda r: grad_w_x(r[0], r[1]))(displacements)
         dwdy = jax.vmap(lambda r: grad_w_y(r[0], r[1]))(displacements)
+        
         grads = jnp.stack([dwdx, dwdy], axis=1)
         vels_pred = new_pos - features["abs_pos"][:, -1]
         vel_difs = vels_pred[features["senders"]] - vels_pred[features["receivers"]]
 
-        div_e = jnp.sum(grads * vel_difs, axis=1) 
+        div_e = jnp.sum(grads * vel_difs, axis=1)
+
+        
         densities = jax.ops.segment_sum(mass * jax.vmap(case.kernel.w)(dists), features["receivers"], num_segments=case.metadata["num_particles_max"])
-        div_e = mass * div_e / densities[features["senders"]]
-        div_e = jnp.nan_to_num(div_e, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        dens_s = densities[features["senders"]]
+        eps   = 1e-8
+        temp = jnp.where(dens_s > eps, mass / dens_s, 0.0)
+
+        div_e = div_e * temp
         
         mask = jnp.logical_not(get_kinematic_mask(particle_type))
-
         div_vel = jnp.where(mask, jax.ops.segment_sum(div_e, features["receivers"], num_segments=case.metadata["num_particles_max"]), 0.0)
         
-        num_fluids = jnp.sum((mask))
+        num_fluids = jnp.sum(mask)
 
         mean_valid = jnp.where(num_fluids > 0, jnp.sum(div_vel**2) / num_fluids, 0.0)
-        total_loss += mean_valid
+        total_loss += 0.1 * mean_valid
         
     return total_loss, state
 
