@@ -30,6 +30,7 @@ from lagrangebench.utils import (
 )
 
 from .strats import push_forward_build, push_forward_sample_steps
+from ..utils_extra.continous_convolution import window_poly6
 
 @partial(jax.jit, static_argnames=["model_fn", "loss_weight", "vel_div_loss"])
 def _mse(
@@ -61,25 +62,39 @@ def _mse(
     mass = case.metadata["dx"] ** case.metadata["dim"]
 
     if vel_div_loss:
-        dt = case.metadata["write_every"] * case.metadata["dt"]
-        pos0 = features["abs_pos"]                # (N, D)
-        def vel_field(pos):
-            # pos: (N,D)
-            new_pos = case.integrate(pred, pos)
-            return (new_pos - pos[:, -1]) / dt
-        J = jax.jacrev(vel_field)(pos0)
-        K = J[:, :, :, -1, :]
-        # jax.debug.print("K.shape={x}", x=K.shape)
-        divs = jnp.einsum('ndnd->n', K)      # shape (N,)
-        # jax.debug.print("divs.shape={x}", x=divs.shape)
-        mask   = ~get_kinematic_mask(particle_type)
-        
-        div_sq = jnp.where(mask, divs**2, 0.0)       # (N,)
+        dt        = case.metadata["write_every"] * case.metadata["dt"]
+        new_pos   = case.integrate(pred, features["abs_pos"])
+        vels_pred = (new_pos - features["abs_pos"][:, -1]) / dt  # (N,D)
+        velocity_stats = case.normalization_stats["velocity"]
+        normalized_velocity_pred = (
+            vels_pred - velocity_stats["mean"]
+        ) / velocity_stats["std"]
+
+        jax.debug.print("norm_vel={} vel_pred={}", jnp.max(jnp.linalg.norm(vels_pred, axis=1)), jnp.max(jnp.linalg.norm(normalized_velocity_pred, axis=1)))
+        # edges
+        s, r = features["senders"], features["receivers"]
+        disp  = jax.vmap(case.displacement, in_axes=(0,0))(new_pos[s], new_pos[r]) / case.metadata["default_connectivity_radius"]        # (E,D)
+        dists = jnp.linalg.norm(disp, axis=1)                    # (E,)
+  
+        # radial velocity difference
+        rad_vel = jnp.sum((normalized_velocity_pred[s] - normalized_velocity_pred[r]), axis=1) #* disp, axis=1)  # (E,)
+        jax.debug.print("rad_vel={x}", x=jnp.max(rad_vel))
+        # weight by kernel (or just drop it if you like)
+        w_ij = jnp.clip(jax.vmap(jax.grad(window_poly6))(dists), -1, 1)            # (E,)
+        jax.debug.print("w_max={x}", x=jnp.max(jnp.abs(w_ij)))
+        # accumulate per‐particle (on receivers)
+        div_approx = jax.ops.segment_sum(w_ij, 
+                                        r, 
+                                        num_segments=case.metadata["num_particles_max"])  # (N,)
+        jax.debug.print("div_max={x}", x = jnp.max(jnp.abs(div_approx)))
+        # form mean‐squared loss over fluid particles
+        mask = ~get_kinematic_mask(particle_type)
+        div_sq = jnp.where(mask, div_approx**2, 0.0)
         nf     = jnp.sum(mask)
-        div_loss = jnp.where(nf > 0,
-                            jnp.sum(div_sq) / nf,
-                            0.0)
-        total_loss = total_loss + 0.1 * div_loss
+        div_loss = jnp.where(nf>0, jnp.sum(div_sq)/nf, 0.0)
+        jax.debug.print("div_sq_sum={x}", x=jnp.max(div_sq))
+        jax.debug.print("div_loss={x}", x=div_loss)
+        total_loss = total_loss + 0.1* jnp.sum(normalized_velocity_pred**2)
 
     return total_loss, state
 
@@ -106,13 +121,25 @@ def _update(
     grads = jax.tree_util.tree_map(lambda x: x.sum(axis=0), grads)
     state = jax.tree_util.tree_map(lambda x: x.sum(axis=0), state)
     loss = jax.tree_util.tree_map(lambda x: x.mean(axis=0), loss)
-
+    # grads = jax.tree_util.tree_map_with_path(
+    #     lambda path, x: report_nan('/'.join(map(str, path)), x),
+    #     grads
+    # )
+    
+    # norm2 = sum(jnp.vdot(x, x) for x in jax.tree_util.tree_leaves(grads))
+    # jax.debug.print("Gradient norm² = {}", norm2)
+    
     updates, opt_state = opt_update(grads, opt_state, params)
     new_params = optax.apply_updates(params, updates)
 
     return loss, new_params, state, opt_state
 
+def report_nan(name, x):
+    flag = jnp.any(jnp.isnan(x)) | jnp.any(jnp.isinf(x))
+    jax.debug.print("Gradient leaf {} has NaN/Inf? {}", name, flag)
+    return x
 
+    
 class Trainer:
     """
     Trainer class.

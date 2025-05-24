@@ -3,6 +3,7 @@ extends: configs/dam_2d/base.yaml
 model: 
   name: cconv
   input_seq_length: 3
+  vel_div_loss: True
 train:
   noise_std: 0.001
   optimizer:
