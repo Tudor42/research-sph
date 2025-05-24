@@ -36,6 +36,7 @@ from ..utils_extra.continous_convolution import window_poly6
 def _mse(
     params: hk.Params,
     state: hk.State,
+    key,
     features: Dict[str, jnp.ndarray],
     particle_type: jnp.ndarray,
     target: jnp.ndarray,
@@ -59,9 +60,19 @@ def _mse(
     total_loss = jnp.array(losses).sum(0)
     total_loss = jnp.where(non_kinematic_mask, total_loss, 0)
     total_loss = total_loss.sum() / num_non_kinematic
-    mass = case.metadata["dx"] ** case.metadata["dim"]
+    # mass = case.metadata["dx"] ** case.metadata["dim"]
 
     if vel_div_loss:
+        mask         = jnp.logical_not(get_kinematic_mask(particle_type))
+        p       = mask.astype(jnp.float32)
+        p_sum   = jnp.sum(p)
+        p       = jnp.where(p_sum>0, p / p_sum, p)
+        
+        particles_to_use = jax.random.choice(key, case.metadata["num_particles_max"],  # N
+                            (100,),
+                            replace=False,
+                            p=p)
+
         dt        = case.metadata["write_every"] * case.metadata["dt"]
         new_pos   = case.integrate(pred, features["abs_pos"])
         vels_pred = (new_pos - features["abs_pos"][:, -1]) / dt  # (N,D)
@@ -70,31 +81,33 @@ def _mse(
             vels_pred - velocity_stats["mean"]
         ) / velocity_stats["std"]
 
-        jax.debug.print("norm_vel={} vel_pred={}", jnp.max(jnp.linalg.norm(vels_pred, axis=1)), jnp.max(jnp.linalg.norm(normalized_velocity_pred, axis=1)))
-        # edges
-        s, r = features["senders"], features["receivers"]
-        disp  = jax.vmap(case.displacement, in_axes=(0,0))(new_pos[s], new_pos[r]) / case.metadata["default_connectivity_radius"]        # (E,D)
-        dists = jnp.linalg.norm(disp, axis=1)                    # (E,)
-  
-        # radial velocity difference
-        rad_vel = jnp.sum((normalized_velocity_pred[s] - normalized_velocity_pred[r]), axis=1) #* disp, axis=1)  # (E,)
-        jax.debug.print("rad_vel={x}", x=jnp.max(rad_vel))
-        # weight by kernel (or just drop it if you like)
-        w_ij = jnp.clip(jax.vmap(jax.grad(window_poly6))(dists), -1, 1)            # (E,)
-        jax.debug.print("w_max={x}", x=jnp.max(jnp.abs(w_ij)))
-        # accumulate per‐particle (on receivers)
-        div_approx = jax.ops.segment_sum(w_ij, 
+        edge_mask = jnp.isin(features["receivers"], particles_to_use)
+        E_max    = 1024  # an upper bound you choose
+        edge_idx = jnp.nonzero(edge_mask, size=E_max)[0]
+
+        s      = jnp.take(features["senders"],   edge_idx)  # shape (E_max,)
+        r      = jnp.take(features["receivers"], edge_idx)  # shape (E_max,)
+
+        # jax.debug.print("senders.shape={}", features["senders"].shape)
+        # jax.debug.print("edges.shape={}", jnp.sum(edge_mask))
+        # jax.debug.print("new_pos.shape={}", new_pos.shape)
+
+        disp  = jax.vmap(case.displacement, in_axes=(0,0))(new_pos[s], new_pos[r]) / case.metadata["default_connectivity_radius"]
+        dists = jnp.linalg.norm(disp, axis=1)
+        # jax.debug.print("disp.shape={}", disp.shape)
+        rad_vel = jnp.sum((normalized_velocity_pred[s] - normalized_velocity_pred[r]) * disp, axis=1)   # (E,)
+        
+        raw_w = jax.vmap(jax.grad(window_poly6))(dists)      # (E,)
+        w_ij  = jax.lax.stop_gradient(raw_w)
+
+        div_approx = jax.ops.segment_sum(w_ij * rad_vel, 
                                         r, 
                                         num_segments=case.metadata["num_particles_max"])  # (N,)
-        jax.debug.print("div_max={x}", x = jnp.max(jnp.abs(div_approx)))
-        # form mean‐squared loss over fluid particles
-        mask = ~get_kinematic_mask(particle_type)
-        div_sq = jnp.where(mask, div_approx**2, 0.0)
-        nf     = jnp.sum(mask)
-        div_loss = jnp.where(nf>0, jnp.sum(div_sq)/nf, 0.0)
-        jax.debug.print("div_sq_sum={x}", x=jnp.max(div_sq))
-        jax.debug.print("div_loss={x}", x=div_loss)
-        total_loss = total_loss + 0.1* jnp.sum(normalized_velocity_pred**2)
+
+        div_loss = jnp.sum(div_approx[particles_to_use]) / 100
+        # jax.debug.print("div_sq_sum={x}", x=jnp.max(div_sq))
+
+        total_loss = total_loss + 0.5 * div_loss
 
     return total_loss, state
 
@@ -109,12 +122,17 @@ def _update(
     opt_state: optax.OptState,
     loss_fn: Callable,
     opt_update: Callable,
+    keys,
 ) -> Tuple[float, hk.Params, hk.State, optax.OptState]:
+    all_keys = jax.vmap(lambda k: jax.random.split(k))(keys)
+    keys = all_keys[:, 0]  
+    subkeys   = all_keys[:, 1] 
+
     value_and_grad_vmap = vmap(
-        jax.value_and_grad(loss_fn, has_aux=True), in_axes=(None, None, 0, 0, 0)
+        jax.value_and_grad(loss_fn, has_aux=True), in_axes=(None, None, 0, 0, 0, 0)
     )
     (loss, state), grads = value_and_grad_vmap(
-        params, state, features_batch, particle_type_batch, target_batch
+        params, state, subkeys, features_batch, particle_type_batch, target_batch, 
     )
 
     # aggregate over the first (batch) dimension of each leave element
@@ -132,7 +150,7 @@ def _update(
     updates, opt_state = opt_update(grads, opt_state, params)
     new_params = optax.apply_updates(params, updates)
 
-    return loss, new_params, state, opt_state
+    return loss, new_params, state, opt_state, keys
 
 def report_nan(name, x):
     flag = jnp.any(jnp.isnan(x)) | jnp.any(jnp.isinf(x))
@@ -426,13 +444,14 @@ class Trainer:
                 # import time
                 # t0 = time.time()
                 # jax.profiler.start_trace("./tmp/")
-                loss, params, state, opt_state = update_fn(
+                loss, params, state, opt_state, keys = update_fn(
                     params=params,
                     state=state,
                     features_batch=features_batch,
                     target_batch=target_batch,
                     particle_type_batch=raw_batch[1],
                     opt_state=opt_state,
+                    keys=keys
                 )
                 # jax.profiler.stop_trace()
                 # t1 = time.time()
