@@ -32,6 +32,49 @@ from lagrangebench.utils import (
 from .strats import push_forward_build, push_forward_sample_steps
 from ..utils_extra.continous_convolution import window_poly6
 
+@jax.jit
+def compute_divergence_loss(new_pos, vels, senders, receivers, particles_to_use, case):
+    edge_mask = jnp.isin(receivers, particles_to_use)
+    E_max    = 10240  # an upper bound you choose
+    edge_idx = jnp.nonzero(edge_mask, size=E_max)[0]
+
+    s      = jnp.take(senders,   edge_idx)  # shape (E_max,)
+    r      = jnp.take(receivers, edge_idx)  # shape (E_max,)
+    
+    new_pos_s = jnp.take(new_pos, s, axis=0)
+    new_pos_r = jnp.take(new_pos, r, axis=0)
+    
+    vels_s = jnp.take(vels, s, axis=0)
+    vels_r = jnp.take(vels, r, axis=0)
+    
+    disp  = jax.vmap(case.displacement, in_axes=(0,0))(new_pos_s, new_pos_r) / case.metadata["default_connectivity_radius"]
+    vel_diff = vels_s - vels_r
+    
+    # jax.debug.print("disp.shape={}", disp.shape)
+    rad_vel = jnp.einsum('ed,ed->e', vel_diff, disp)            # (E_max,)
+    r2      = jnp.einsum('ed,ed->e', disp, disp)            # (E_max,)
+    
+    # raw_w = jax.vmap(jax.grad(window_poly6))(dists)      # (E,)
+    w     = jnp.where(
+                (r2>0.0)&(r2<1.0),
+                -6.0 * jnp.sqrt(r2) * (1.0 - r2)**2,
+                0.0
+             )
+    
+    w  = jax.lax.stop_gradient(w)
+
+    #div_approx = 
+    idx_map = jnp.ones((case.metadata["num_particles_max"],), dtype=jnp.int32).at[particles_to_use].set(jnp.arange(1024))
+    r_reduced = idx_map[r]
+    
+    div_approx = jax.ops.segment_sum( w * rad_vel, 
+                                     r_reduced, 
+                                     num_segments=1024)  # (N,)
+
+    return jnp.mean(div_approx ** 2)
+    
+    
+
 @partial(jax.jit, static_argnames=["model_fn", "loss_weight", "vel_div_loss"])
 def _mse(
     params: hk.Params,
@@ -63,13 +106,12 @@ def _mse(
     # mass = case.metadata["dx"] ** case.metadata["dim"]
 
     if vel_div_loss:
-        mask         = jnp.logical_not(get_kinematic_mask(particle_type))
-        p       = mask.astype(jnp.float32)
+        p       = non_kinematic_mask.astype(jnp.float32)
         p_sum   = jnp.sum(p)
         p       = jnp.where(p_sum>0, p / p_sum, p)
         
         particles_to_use = jax.random.choice(key, case.metadata["num_particles_max"],  # N
-                            (100,),
+                            (1024,),
                             replace=False,
                             p=p)
 
@@ -81,33 +123,8 @@ def _mse(
             vels_pred - velocity_stats["mean"]
         ) / velocity_stats["std"]
 
-        edge_mask = jnp.isin(features["receivers"], particles_to_use)
-        E_max    = 1024  # an upper bound you choose
-        edge_idx = jnp.nonzero(edge_mask, size=E_max)[0]
-
-        s      = jnp.take(features["senders"],   edge_idx)  # shape (E_max,)
-        r      = jnp.take(features["receivers"], edge_idx)  # shape (E_max,)
-
-        # jax.debug.print("senders.shape={}", features["senders"].shape)
-        # jax.debug.print("edges.shape={}", jnp.sum(edge_mask))
-        # jax.debug.print("new_pos.shape={}", new_pos.shape)
-
-        disp  = jax.vmap(case.displacement, in_axes=(0,0))(new_pos[s], new_pos[r]) / case.metadata["default_connectivity_radius"]
-        dists = jnp.linalg.norm(disp, axis=1)
-        # jax.debug.print("disp.shape={}", disp.shape)
-        rad_vel = jnp.sum((normalized_velocity_pred[s] - normalized_velocity_pred[r]) * disp, axis=1)   # (E,)
-        
-        raw_w = jax.vmap(jax.grad(window_poly6))(dists)      # (E,)
-        w_ij  = jax.lax.stop_gradient(raw_w)
-
-        div_approx = jax.ops.segment_sum(w_ij * rad_vel, 
-                                        r, 
-                                        num_segments=case.metadata["num_particles_max"])  # (N,)
-
-        div_loss = jnp.sum(div_approx[particles_to_use]) / 100
-        # jax.debug.print("div_sq_sum={x}", x=jnp.max(div_sq))
-
-        total_loss = total_loss + 0.5 * div_loss
+        div_loss = compute_divergence_loss(new_pos, normalized_velocity_pred, features["senders"], features["receivers"], particles_to_use, case)
+        total_loss = total_loss + 0.2 * div_loss
 
     return total_loss, state
 
@@ -441,8 +458,8 @@ class Trainer:
                     # did_buffer_overflow > 0 we directly return to the beginning
                     continue
                 keys = _keys
-                # import time
-                # t0 = time.time()
+                import time
+                t0 = time.time()
                 # jax.profiler.start_trace("./tmp/")
                 loss, params, state, opt_state, keys = update_fn(
                     params=params,
@@ -454,8 +471,9 @@ class Trainer:
                     keys=keys
                 )
                 # jax.profiler.stop_trace()
-                # t1 = time.time()
-                # print("elapsed:", t1 - t0)
+                loss.block_until_ready()
+                t1 = time.time()
+                print("elapsed:", t1 - t0)
                 if step % cfg_logging.log_steps == 0:
                     loss.block_until_ready()
                     if cfg_logging.wandb:
