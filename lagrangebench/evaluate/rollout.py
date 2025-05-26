@@ -401,7 +401,7 @@ def infer(
         model_apply=model_apply,
         case=case,
         metrics_computer=metrics_computer,
-        params=params,
+        params=params["model"],
         state=state,
         neighbors=neighbors,
         loader_eval=loader_test,

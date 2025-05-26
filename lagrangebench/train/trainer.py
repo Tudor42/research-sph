@@ -64,7 +64,8 @@ def compute_divergence_loss(new_pos, vels, senders, receivers, case, particles_t
     
     div_approx = jax.ops.segment_sum(grad_w * rad_vel_dens, receivers, num_segments=case.metadata["num_particles_max"]) # / jnp.sum(densities) # (N,)
     div_approx = jnp.where(particles_types, div_approx, 0.0)
-    return jnp.sum(div_approx ** 2)
+    
+    return jnp.sum(div_approx ** 2), jnp.sum(jnp.where(senders != receivers, jnp.clip(case.metadata["dx"] - disp, 0, case.metadata["dx"])))
     
     
 
@@ -81,7 +82,7 @@ def _mse(
     case,
     vel_div_loss = False,
 ):
-    pred, state = model_fn(params, state, (features, particle_type))
+    pred, state = model_fn(params["model"], state, (features, particle_type))
     # check active (non zero) output shapes
     assert all(target[k].shape == pred[k].shape for k in pred)
 
@@ -107,11 +108,13 @@ def _mse(
             vels_pred - velocity_stats["mean"]
         ) / velocity_stats["std"]
 
-        div_loss = compute_divergence_loss(new_pos, normalized_velocity_pred, features["senders"], features["receivers"], case, non_kinematic_mask, case.metadata["dx"] ** case.metadata["dim"]) / num_non_kinematic
+        div_loss, proximity_loss = compute_divergence_loss(new_pos, normalized_velocity_pred, features["senders"], features["receivers"], case, non_kinematic_mask, case.metadata["dx"] ** case.metadata["dim"]) / num_non_kinematic
         # jax.debug.print("div_loss={}", div_loss)
+        precision = params["meta"]["raw_logs"]
+        weights = jnp.exp(-precision)
+        precision = precision / 2
         
-        total_loss = total_loss + div_loss / (total_loss + div_loss + 1e-8)
-
+        total_loss = weights * jnp.array([total_loss, div_loss, proximity_loss]) + jnp.sum(precision)
 
     return total_loss, state
 
@@ -349,6 +352,9 @@ class Trainer:
             # initialize new model
             key, subkey = jax.random.split(key, 2)
             params, state = model.init(subkey, (features, particle_type[0]))
+            meta = {"raw_logs": jnp.ones((3,))}
+            params = {"model": params,
+                      "meta": meta,} 
 
         # start logging
         if cfg_logging.wandb:
@@ -425,7 +431,7 @@ class Trainer:
                         raw_batch[1],
                         time_steps,
                         neighbors_batch,
-                        params,
+                        params["model"],
                         state,
                     )
 
@@ -476,7 +482,7 @@ class Trainer:
                         case=case,
                         metrics_computer=self.metrics_computer,
                         model_apply=model_apply,
-                        params=params,
+                        params=params["model"],
                         state=state,
                         neighbors=nbrs,
                         loader_eval=loader_valid,
