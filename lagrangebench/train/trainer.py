@@ -33,27 +33,29 @@ from .strats import push_forward_build, push_forward_sample_steps
 from ..utils_extra.continous_convolution import window_poly6
 
 @partial(jax.jit, static_argnames=["mass"])
-def compute_divergence_loss(new_pos, vels, senders, receivers, case, particles_types, mass):    
-    disp  = jax.vmap(case.displacement, in_axes=(0,0))(new_pos[senders], new_pos[receivers]) / case.metadata["default_connectivity_radius"]
+def compute_divergence_loss(new_pos, vels, senders, receivers, case, non_kinematic_mask, mass):    
+    disp  = jax.vmap(case.displacement, in_axes=(0,0))(new_pos[senders], new_pos[receivers]) 
     vel_diff = vels[senders] - vels[receivers]
+    mask_out_self_edges = (senders != receivers)
     
     rad_vel = jnp.einsum('ed,ed->e', vel_diff, disp)            # (E_max,)
     r2      = jnp.einsum('ed,ed->e', disp, disp)            # (E_max,)
     
     grad_w     = jnp.where(
-                (r2>0.0)&(r2<1.0),
-                -6.0 * jnp.sqrt(r2) * (1.0 - r2)**2,
+                (r2>0.0)&(r2<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
+                jax.vmap(case.kernel.grad_w)(r2),
                 0.0
              )
-    
-    grad_w  = jax.lax.stop_gradient(grad_w)
 
-    w = jnp.where((r2>0.0)&(r2<1.0),
-                  (1-r2)**3,
+    grad_w  = jax.lax.stop_gradient(grad_w)
+    
+    w = jnp.where((r2>0.0)&(r2<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
+                  case.kernel.w(r2),
                   0.0
                  )
     w = jax.lax.stop_gradient(w)
     densities = jax.ops.segment_sum(w, receivers, num_segments=case.metadata["num_particles_max"])
+
     dens_edge = densities[senders]
 
     inv_dens   = jnp.where(dens_edge > 0.0,
@@ -63,9 +65,13 @@ def compute_divergence_loss(new_pos, vels, senders, receivers, case, particles_t
     rad_vel_dens = jnp.einsum('e,e->e', inv_dens, rad_vel)
     
     div_approx = jax.ops.segment_sum(grad_w * rad_vel_dens, receivers, num_segments=case.metadata["num_particles_max"]) # / jnp.sum(densities) # (N,)
-    div_approx = jnp.where(particles_types, div_approx, 0.0)
+    div_approx = jnp.where(non_kinematic_mask, div_approx, 0.0)
     
-    return jnp.sum(div_approx ** 2), jnp.sum(jnp.where(senders != receivers, jnp.clip(case.metadata["dx"] - disp, 0, case.metadata["dx"])))
+    weighted_div_approx = jnp.where(non_kinematic_mask, densities, 0.0) * div_approx
+    
+    min_dist = case.metadata["dx"]
+    
+    return jnp.sum(div_approx ** 2), min_dist * jnp.sum(jnp.where(mask_out_self_edges & non_kinematic_mask[receivers], jnp.clip((min_dist - r2) / min_dist, 0.0, 1.0), 0.0))
     
     
 
@@ -98,7 +104,9 @@ def _mse(
     total_loss = jnp.where(non_kinematic_mask, total_loss, 0)
     total_loss = total_loss.sum() / num_non_kinematic
     # mass = case.metadata["dx"] ** case.metadata["dim"]
-
+    div_loss = 0.0
+    proximity_loss = 0.0
+    data_loss = total_loss
     if vel_div_loss:
         dt        = case.metadata["write_every"] * case.metadata["dt"]
         new_pos   = case.integrate(pred, features["abs_pos"])
@@ -108,15 +116,18 @@ def _mse(
             vels_pred - velocity_stats["mean"]
         ) / velocity_stats["std"]
 
-        div_loss, proximity_loss = compute_divergence_loss(new_pos, normalized_velocity_pred, features["senders"], features["receivers"], case, non_kinematic_mask, case.metadata["dx"] ** case.metadata["dim"]) / num_non_kinematic
+        div_loss, proximity_loss = compute_divergence_loss(new_pos, normalized_velocity_pred, features["senders"], features["receivers"], case, non_kinematic_mask, case.metadata["dx"] ** case.metadata["dim"])
+
+        div_loss = div_loss
+        proximity_loss = proximity_loss / num_non_kinematic
         # jax.debug.print("div_loss={}", div_loss)
         precision = params["meta"]["raw_logs"]
-        weights = jnp.exp(-precision)
+        weights = 0.5 * jnp.exp(-precision)
         precision = precision / 2
         
-        total_loss = weights * jnp.array([total_loss, div_loss, proximity_loss]) + jnp.sum(precision)
+        total_loss = jnp.sum(weights * jnp.array([total_loss, div_loss, proximity_loss]) + precision)
 
-    return total_loss, state
+    return total_loss, (state, jnp.array([data_loss, div_loss, proximity_loss]))
 
 
 @partial(jax.jit, static_argnames=["loss_fn", "opt_update"])
@@ -138,7 +149,7 @@ def _update(
     value_and_grad_vmap = vmap(
         jax.value_and_grad(loss_fn, has_aux=True), in_axes=(None, None, 0, 0, 0, 0)
     )
-    (loss, state), grads = value_and_grad_vmap(
+    (loss, (state, separate_losses)), grads = value_and_grad_vmap(
         params, state, subkeys, features_batch, particle_type_batch, target_batch, 
     )
 
@@ -146,6 +157,7 @@ def _update(
     grads = jax.tree_util.tree_map(lambda x: x.sum(axis=0), grads)
     state = jax.tree_util.tree_map(lambda x: x.sum(axis=0), state)
     loss = jax.tree_util.tree_map(lambda x: x.mean(axis=0), loss)
+    separate_losses= jnp.mean(separate_losses, axis=0)
     # grads = jax.tree_util.tree_map_with_path(
     #     lambda path, x: report_nan('/'.join(map(str, path)), x),
     #     grads
@@ -157,7 +169,7 @@ def _update(
     updates, opt_state = opt_update(grads, opt_state, params)
     new_params = optax.apply_updates(params, updates)
 
-    return loss, new_params, state, opt_state, keys
+    return loss, new_params, state, opt_state, keys, separate_losses
 
 def report_nan(name, x):
     flag = jnp.any(jnp.isnan(x)) | jnp.any(jnp.isinf(x))
@@ -454,7 +466,7 @@ class Trainer:
                 # import time
                 # t0 = time.time()
                 # jax.profiler.start_trace("./tmp/")
-                loss, params, state, opt_state, keys = update_fn(
+                loss, params, state, opt_state, keys, separate_loss = update_fn(
                     params=params,
                     state=state,
                     features_batch=features_batch,
@@ -475,8 +487,31 @@ class Trainer:
                     else:
                         step_str = str(step).zfill(len(str(int(step_max))))
                         print(f"{step_str}, train/loss: {loss.item():.5f}.")
+                    s_vals   = jax.device_get(params["meta"]["raw_logs"]).tolist()      # [s0,s1,s2]
+                    comp_l   = jax.device_get(separate_loss).tolist()                  # [data,div,prox]
+                    
+                    csv_path = os.path.join(store_ckp, "loss_trace.csv")
+                    if not os.path.exists(csv_path):
+                        with open(csv_path, "w") as f:
+                            f.write(
+                                "step,"
+                                "logw0,logw1,logw2,"
+                                "data_loss,div_loss,prox_loss,"
+                                "total_loss\n"
+                            )
+                    with open(csv_path, "a") as f:
+                        f.write(
+                            f"{step},"
+                            + ",".join(map(str, s_vals))   + ","
+                            + ",".join(map(str, comp_l))   + ","
+                            + f"{loss.item()}\n"
+                        )
+                    jax.debug.print("params_meta={}", params["meta"])
+                    jax.debug.print("separata_losses={}", separate_loss)
 
-                if step % cfg_logging.eval_steps == 0 and step > 0:
+
+
+                if step % cfg_logging.eval_steps == 0 and step >= 0:
                     nbrs = broadcast_from_batch(neighbors_batch, index=0)
                     eval_metrics = eval_rollout(
                         case=case,
@@ -496,6 +531,7 @@ class Trainer:
                     metadata_ckp = {
                         "step": step,
                         "loss": metrics.get("val/loss", None),
+                        "vel_div": metrics.get("val/rho_deviation", None),
                     }
                     if store_ckp is not None:
                         save_haiku(store_ckp, params, state, opt_state, metadata_ckp)

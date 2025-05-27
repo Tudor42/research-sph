@@ -126,7 +126,7 @@ def _eval_batched_rollout(
     kernel  = case.kernel.w
 
     predictions_batch = jnp.zeros((current_batch_size, traj_len, n_nodes_max, dim))
-    densities_batch = jnp.zeros((current_batch_size, traj_len, n_nodes_max))
+    densities_batch = jnp.zeros((current_batch_size, traj_len))
     neighbors_batch = broadcast_to_batch(neighbors, current_batch_size)
     
     calculate_densities_batched = jax.vmap(calculate_densities, in_axes=(0, 0, None, None, None, None))
@@ -187,7 +187,7 @@ def _eval_batched_rollout(
     target_positions_batch = target_positions_batch.transpose(0, 2, 1, 3)
     # slice out extrapolation steps
     metrics_batch = metrics_computer_vmap(
-        predictions_batch[:, :n_rollout_steps, :, :], target_positions_batch, densities_batch[:, :n_rollout_steps, :]
+        predictions_batch[:, :n_rollout_steps, :, :], target_positions_batch, densities_batch[:, :n_rollout_steps]
     )
 
     return (predictions_batch, metrics_batch, broadcast_from_batch(neighbors_batch, 0))
@@ -413,7 +413,17 @@ def infer(
     )
     return eval_metrics
 
+@partial(jax.jit, static_argnames=("kernel","n_nodes_max"))
 def calculate_densities(features, particle_types, kernel, con_radius, mass, n_nodes_max):
-    raw_densities = jax.ops.segment_sum(mass * kernel(con_radius * features["rel_dist"]), features["senders"], n_nodes_max)[:, 0]
+    interactions = jnp.where(features["senders"] != features["receivers"], mass * kernel(con_radius * features["rel_dist"][:, 0]), 0.0)
+    raw_densities = jax.ops.segment_sum(interactions, features["senders"], n_nodes_max)
+    #raw_densities = density_block(features["rel_dist"], features["senders"], features["receivers"], mass, con_radius, kernel, n_nodes_max)
     mask = get_kinematic_mask(particle_types)
-    return jnp.where(mask, 1.0, raw_densities)
+    return jnp.mean(jnp.where(mask, 1.0, raw_densities) - 1)
+
+@partial(jax.checkpoint, static_argnums=(5,6,))
+def density_block(rel_dist, send, recv, mass, con_r, kernel, n):
+    # masked = jnp.where(send != recv, rel_dist, 10.0)
+    w      = jnp.where(send != recv, mass * kernel(con_r * rel_dist[:, 0]), 0.0)
+    jax.debug.print("w={}", w.shape)
+    return jax.ops.segment_sum(w, send, n)
