@@ -511,7 +511,7 @@ class Trainer:
 
 
 
-                if step % cfg_logging.eval_steps == 0 and step >= 0:
+                if step % cfg_logging.eval_steps == 0 and step > 0:
                     nbrs = broadcast_from_batch(neighbors_batch, index=0)
                     eval_metrics = eval_rollout(
                         case=case,
@@ -531,8 +531,24 @@ class Trainer:
                     metadata_ckp = {
                         "step": step,
                         "loss": metrics.get("val/loss", None),
-                        "vel_div": metrics.get("val/rho_deviation", None),
+                        "rho_deviation": metrics.get("val/rho_deviation", None),
                     }
+                    csv_path = os.path.join(store_ckp, "eval_results.csv")
+                    if not os.path.exists(csv_path):
+                        with open(csv_path, "w") as f:
+                            f.write(
+                                "step,"
+                                "loss,"
+                                "rho_deviation"
+                                "\n"
+                            )
+                    with open(csv_path, "a") as f:
+                        f.write(
+                            f"{step},"
+                            + str(metadata_ckp["loss"])   + ","
+                            + str(metdata_ckp["rho_deviation"]) + "\n"
+                        )
+
                     if store_ckp is not None:
                         save_haiku(store_ckp, params, state, opt_state, metadata_ckp)
 
