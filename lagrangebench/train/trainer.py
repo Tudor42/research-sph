@@ -546,7 +546,7 @@ class Trainer:
                         f.write(
                             f"{step},"
                             + str(metadata_ckp["loss"])   + ","
-                            + str(metdata_ckp["rho_deviation"]) + "\n"
+                            + str(metadata_ckp["rho_deviation"]) + "\n"
                         )
 
                     if store_ckp is not None:
