@@ -4,7 +4,7 @@ model:
   name: gns
   num_mp_steps: 10
   latent_dim: 128
-  vel_div_loss: True
+  vel_div_loss: False
 train:
   noise_std: 0.001
   optimizer:

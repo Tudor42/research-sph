@@ -7,3 +7,7 @@ train:
   noise_std: 0.001
   optimizer:
     lr_start: 5.e-4
+  loss_weight:
+    pos: 1.0
+    vel: 0.0
+    acc: 0.0

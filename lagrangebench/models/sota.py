@@ -201,11 +201,8 @@ class MyParticleNetwork(BaseModel):
 
         # now do the position update
         pos2_candidate = self.shift_fn(pos1, dt * (vel2 + vel1) / 2.0)   # shape (N, dim)
-        pos2 = jnp.where(mask[:, None],
-                        pos2_candidate,
-                        pos1)                        # shape (N, dim)
-
-        return pos2, vel2
+        
+        return pos2_candidate, vel2
 
     def __call__(
         self, sample: Tuple[Dict[str, jnp.ndarray], jnp.ndarray]
@@ -260,5 +257,5 @@ class MyParticleNetwork(BaseModel):
             if len(ans_convs) == 3 and ans_dense_cconv.shape[-1] == ans_convs[-2].shape[-1]:
                 ans_select = self.resAff(ans_select, ans_convs[-2], senders, receivers, rel_pos, self.radius, a=a_ff)
             ans_convs.append(ans_select)
-        
+        # pos2 +=  
         return {"acc": ans_convs[-1] / 128.0}

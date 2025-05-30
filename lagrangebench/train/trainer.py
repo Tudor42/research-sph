@@ -109,14 +109,14 @@ def _mse(
     data_loss = total_loss
     if vel_div_loss:
         dt        = case.metadata["write_every"] * case.metadata["dt"]
-        new_pos   = case.integrate(pred, features["abs_pos"])
+        new_pos   = case.integrate(pred, features["abs_pos"][:, -2:])
         vels_pred = (new_pos - features["abs_pos"][:, -1]) / dt  # (N,D)
-        velocity_stats = case.normalization_stats["velocity"]
-        normalized_velocity_pred = (
-            vels_pred - velocity_stats["mean"]
-        ) / velocity_stats["std"]
+        # velocity_stats = case.normalization_stats["velocity"]
+        # normalized_velocity_pred = (
+        #     vels_pred - velocity_stats["mean"]
+        # ) / velocity_stats["std"]
 
-        div_loss, proximity_loss = compute_divergence_loss(new_pos, normalized_velocity_pred, features["senders"], features["receivers"], case, non_kinematic_mask, case.metadata["dx"] ** case.metadata["dim"])
+        div_loss, proximity_loss = compute_divergence_loss(new_pos, vels_pred, features["senders"], features["receivers"], case, non_kinematic_mask, case.metadata["dx"] ** case.metadata["dim"])
 
         div_loss = div_loss
         proximity_loss = proximity_loss / num_non_kinematic
@@ -124,8 +124,8 @@ def _mse(
         precision = params["meta"]["raw_logs"]
         weights = 0.5 * jnp.exp(-precision)
         precision = precision / 2
-        
-        total_loss = jnp.sum(weights * jnp.array([total_loss, div_loss, proximity_loss]) + precision)
+       
+        total_loss = jnp.sum(weights * jnp.array([0.5 * total_loss, 1e+8 * div_loss, 1e+1 * proximity_loss]) + precision)
 
     return total_loss, (state, jnp.array([data_loss, div_loss, proximity_loss]))
 
@@ -432,7 +432,7 @@ class Trainer:
                 )
                 # unroll for push-forward steps
                 _current_pos = raw_batch[0][:, :, : self.input_seq_length]
-                time_steps = raw_batch[2]
+                time_steps = raw_batch[2][:, : self.input_seq_length]
                 for _ in range(unroll_steps):
                     if neighbors_batch.did_buffer_overflow.sum() > 0:
                         break

@@ -217,7 +217,7 @@ class H5Dataset(Dataset):
         traj_pos = traj["position"]
         # load and transpose the trajectory
         pos_input = traj_pos[slice_from:slice_to].transpose((1, 0, 2))
-        frame_idxs = jnp.arange(slice_from, slice_to)
+        frame_idxs = jnp.arange(slice_from+1, slice_to+1)
 
         particle_type = traj["particle_type"][:]
 
@@ -244,7 +244,7 @@ class H5Dataset(Dataset):
         # load only a slice of the positions. Now, this is an array in memory.
         pos_input_and_target = traj_pos[el_idx : el_idx + self.subseq_length]
         pos_input_and_target = pos_input_and_target.transpose((1, 0, 2))
-        frame_idxs = np.arange(el_idx, el_idx + self.subseq_length)
+        frame_idxs = np.arange(el_idx + 1, el_idx + self.subseq_length + 1)
 
         particle_type = traj["particle_type"][:]
 

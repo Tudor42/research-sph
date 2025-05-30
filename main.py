@@ -42,8 +42,6 @@ def load_embedded_configs(config_path: str, cli_args: DictConfig) -> DictConfig:
 
 
 if __name__ == "__main__":
-    import jax
-    jax.config.update("jax_debug_nans", True)
     cli_args = OmegaConf.from_cli()
     
     assert ("config" in cli_args) != (

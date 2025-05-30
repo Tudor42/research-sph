@@ -123,7 +123,29 @@ def physical_feature_builder(
             normalized_relative_displacements
         )
         features["rel_dist"] = normalized_relative_distances[:, None]
+        n_times = t.shape[0]
+        seq_len = pos_input.shape[1]
 
+        # lax.cond will execute the "print_fn" only if the predicate is True.
+        def print_fn(args):
+            n_times, seq_len = args
+            # this executes inside the compiled code
+            jax.debug.print(
+                "Error at feature creation time: t has length {} but pos_input has sequence length {}",
+                n_times, seq_len
+            )
+            return 0   # any dummy return
+    
+        def no_op_fn(args):
+            return 0
+    
+        # predicate: sequences mismatch?
+        mismatch = (seq_len != n_times)
+        # run the conditional print
+        _ = lax.cond(mismatch,
+                     print_fn,
+                     no_op_fn,
+                     (n_times, seq_len))
         return jax.tree_util.tree_map(lambda f: f, features)
 
     return feature_transform

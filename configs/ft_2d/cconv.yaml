@@ -3,9 +3,13 @@ extends: configs/ft_2d/base.yaml
 model: 
   name: cconv
   input_seq_length: 3
-  vel_div_loss: True
+  vel_div_loss: False
 train:
   batch_size: 1S
   noise_std: 0.001
   optimizer:
     lr_start: 5.e-4
+  loss_weight:
+    pos: 1.0
+    vel: 0.0
+    acc: 0.0
