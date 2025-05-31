@@ -257,5 +257,4 @@ class MyParticleNetwork(BaseModel):
             if len(ans_convs) == 3 and ans_dense_cconv.shape[-1] == ans_convs[-2].shape[-1]:
                 ans_select = self.resAff(ans_select, ans_convs[-2], senders, receivers, rel_pos, self.radius, a=a_ff)
             ans_convs.append(ans_select)
-        # pos2 +=  
-        return {"acc": ans_convs[-1] / 128.0}
+        return {"pos": pos2 + ans_convs[-1] / 128.0}

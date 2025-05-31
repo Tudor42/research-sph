@@ -419,7 +419,7 @@ def calculate_densities(features, particle_types, kernel, con_radius, mass, n_no
     raw_densities = jax.ops.segment_sum(interactions, features["senders"], n_nodes_max)
     #raw_densities = density_block(features["rel_dist"], features["senders"], features["receivers"], mass, con_radius, kernel, n_nodes_max)
     mask = get_kinematic_mask(particle_types)
-    return jnp.mean(jnp.where(mask, 1.0, raw_densities) - 1)
+    return jnp.mean((jnp.where(mask, 1.0, raw_densities) - 1)**2)
 
 @partial(jax.checkpoint, static_argnums=(5,6,))
 def density_block(rel_dist, send, recv, mass, con_r, kernel, n):
