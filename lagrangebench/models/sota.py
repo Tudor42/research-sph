@@ -48,17 +48,18 @@ class AFF(hk.Module):
         receivers,
         rel_pos: jnp.ndarray,
         window_support,
-        a
+        a,
+        isTraining=False
     ) -> jnp.ndarray:
         xa = jnp.concatenate([x, y], axis=-1)
         
         xl = self.cconv1(xa[senders], receivers, rel_pos, window_support, a)
-        xl = self.bn1(xl, is_training=True)
+        xl = self.bn1(xl, is_training=isTraining)
         xl = jax.nn.relu(xl)
 
         xl = self.cconv2(xl[senders], receivers, rel_pos, window_support, a)
 
-        xl = self.bn2(xl, is_training=True)
+        xl = self.bn2(xl, is_training=isTraining)
         wei = jax.nn.sigmoid(xl)
         
         return 2.0 * x * wei + 2.0 * y * (1.0 - wei)
@@ -100,24 +101,25 @@ class IAFF(hk.Module):
         receivers,
         rel_pos: jnp.ndarray,
         window_support,
-        a
+        a,
+        isTraining=False
     ) -> jnp.ndarray:
         xa = jnp.concatenate([x, y], axis=-1)
         # first AFF
         xl = self.cconv1(xa[senders], receivers, rel_pos, window_support, a)
-        xl = self.bn1(xl, is_training=True)
+        xl = self.bn1(xl, is_training=isTraining)
         xl = jax.nn.relu(xl)
 
         xl = self.cconv2(xl[senders], receivers, rel_pos, window_support, a)
-        xl = self.bn2(xl, is_training=True)
+        xl = self.bn2(xl, is_training=isTraining)
         wei1 = jax.nn.sigmoid(xl)
         xo = 2.0 * x * wei1 + 2.0 * y * (1.0 - wei1)
         # second AFF
         xl2 = self.cconv3(xo[senders], receivers, rel_pos, window_support, a)
-        xl2 = self.bn3(xl2, is_training=True)
+        xl2 = self.bn3(xl2, is_training=isTraining)
         xl2 = jax.nn.relu(xl2)
         xl2 = self.cconv4(xl2[senders], receivers, rel_pos, window_support, a)
-        xl2 = self.bn4(xl2, is_training=True)
+        xl2 = self.bn4(xl2, is_training=isTraining)
         wei2 = jax.nn.sigmoid(xl2)
         return 2.0 * x * wei2 + 2.0 * y * (1.0 - wei2)
     
@@ -155,7 +157,7 @@ class MyParticleNetwork(BaseModel):
         # initial fluid/obstacle conv and dense
         self.conv0_fluid = ConvLayer(3, self.layer_channels[0])
         self.dense0_fluid = hk.Linear(output_size=self.layer_channels[0])
-        self.conv0_obstacle = ConvLayer(3, self.layer_channels[0])
+        self.conv0_obstacle = ConvLayer(4, self.layer_channels[0])
         
         self.convs = []
         self.denses = []
@@ -170,7 +172,7 @@ class MyParticleNetwork(BaseModel):
         self.aff_ascc = IAFF(channels=32, inter_channels=64, num_particles=num_particles, conv_type='ascc')
         self.conv0_fluid_ascc = ConvLayer(3, self.layer_channels[0], conv_type="ascc")
         self.dense0_fluid_ascc = hk.Linear(output_size=self.layer_channels[0])
-        self.conv0_obstacle_ascc = ConvLayer(3, self.layer_channels[0], conv_type="ascc")
+        self.conv0_obstacle_ascc = ConvLayer(4, self.layer_channels[0], conv_type="ascc")
 
         self.convs_ascc = []
         self.denses_ascc = []
@@ -189,23 +191,9 @@ class MyParticleNetwork(BaseModel):
             aff = AFF(channels=ch, inter_channels=ch, num_particles=self.num_particles, conv_type='cconv')
             self.affs.append(aff)
         self.resAff = AFF(channels=64, inter_channels=64, num_particles=self.num_particles, conv_type='cconv')
-
-    def integrate_pos_vel(self, pos1, vel1, mask, force):
-        dt   = self.timestep
-        # compute candidate update everywhere
-        vel2_candidate = vel1 + dt * force           # shape (N, dim)
-        # select updated velocities where mask is True, else keep old
-        vel2 = jnp.where(mask[:, None],
-                        vel2_candidate,
-                        vel1)                       # shape (N, dim)
-
-        # now do the position update
-        pos2_candidate = self.shift_fn(pos1, dt * (vel2 + vel1) / 2.0)   # shape (N, dim)
         
-        return pos2_candidate, vel2
-
     def __call__(
-        self, sample: Tuple[Dict[str, jnp.ndarray], jnp.ndarray]
+        self, sample: Tuple[Dict[str, jnp.ndarray], jnp.ndarray], isTraining=True,
     ) -> Dict[str, jnp.ndarray]:
         features, particle_types = sample
 
@@ -214,18 +202,19 @@ class MyParticleNetwork(BaseModel):
         fluid_mask = fluid_mask[..., None]  
         
         fluid_feats = jnp.concatenate([jnp.ones((pos2.shape[0],1)), vel2], axis=-1)
-        box_feat =  jnp.concatenate([jnp.ones((pos2.shape[0],1)), vel2], axis=-1)
+        box_feat = vel2
         #fm = fluid_mask[:, None]  # shape: (num_particles, 1)
         
-        # Keep only “fluid” rows; set wall‐rows to zero:
         fluid_feats = jnp.where(fluid_mask, fluid_feats, 0.0)
         box_feat   = jnp.where(fluid_mask, 0.0,   box_feat)
         senders, receivers = features["senders"], features["receivers"]
         
         rel_pos = features["rel_disp"]
+        box_sender_feats = jnp.concatenate([rel_pos, box_feat[senders]], axis=-1)
+
         
-        fw_mask = ((particle_types[senders] == Tag.MOVING_WALL) | (particle_types[senders] == Tag.SOLID_WALL) | (particle_types[senders] == Tag.DIRICHLET_WALL)) & (particle_types[receivers] == Tag.FLUID)
-        ff_mask = (particle_types[senders] == Tag.FLUID) & (particle_types[receivers] == Tag.FLUID)
+        fw_mask = ((particle_types[senders] == Tag.MOVING_WALL) | (particle_types[senders] == Tag.SOLID_WALL) | (particle_types[senders] == Tag.DIRICHLET_WALL)) & (particle_types[receivers] == Tag.FLUID) & (receivers != senders)
+        ff_mask = (particle_types[senders] == Tag.FLUID) & (particle_types[receivers] == Tag.FLUID) & (receivers != senders)
         w = window_function_batched(features["rel_dist"][:, 0])
         a_fw = jnp.where(fw_mask, w, jnp.array(0.0, dtype=rel_pos.dtype))
         a_ff = jnp.where(ff_mask, w, jnp.array(0.0, dtype=rel_pos.dtype))
@@ -234,8 +223,8 @@ class MyParticleNetwork(BaseModel):
         ans_d = self.dense0_fluid(fluid_feats)
         ans_d = jnp.where(fluid_mask, ans_d, 0.0)
 
-        obs_f = self.conv0_obstacle(box_feat[senders], receivers, rel_pos, self.radius, a=a_fw)
-        hybrid = self.aff_cconv(ans_f, obs_f, senders, receivers, rel_pos, self.radius, a=a_ff)
+        obs_f = self.conv0_obstacle(box_sender_feats, receivers, rel_pos, self.radius, a=a_fw)
+        hybrid = self.aff_cconv(ans_f, obs_f, senders, receivers, rel_pos, self.radius, a=a_ff, isTraining=isTraining)
         feats = jnp.concatenate([hybrid, ans_d], axis=-1)
         
         # ascc
@@ -244,11 +233,11 @@ class MyParticleNetwork(BaseModel):
         ans_d_ascc = self.dense0_fluid_ascc(fluid_feats)
         ans_d_ascc = jnp.where(fluid_mask, ans_d_ascc, 0.0)
         
-        obs_f_ascc = self.conv0_obstacle_ascc(box_feat[senders], receivers, rel_pos, self.radius, a=a_fw)
-        hybrid_ascc = self.aff_ascc(ans_f_ascc, obs_f_ascc, senders, receivers, rel_pos, self.radius, a=a_ff)
+        obs_f_ascc = self.conv0_obstacle_ascc(box_sender_feats, receivers, rel_pos, self.radius, a=a_fw)
+        hybrid_ascc = self.aff_ascc(ans_f_ascc, obs_f_ascc, senders, receivers, rel_pos, self.radius, a=a_ff, isTraining=isTraining)
         feats_ascc = jnp.concatenate([hybrid_ascc, ans_d_ascc], axis=-1)
 
-        feats_select = self.aff0(feats, feats_ascc, senders, receivers, rel_pos, self.radius, a=a_ff)
+        feats_select = self.aff0(feats, feats_ascc, senders, receivers, rel_pos, self.radius, a=a_ff, isTraining=isTraining)
 
         ans_convs = [feats_select]
         
@@ -270,11 +259,11 @@ class MyParticleNetwork(BaseModel):
             ans_ascc = ans_conv_ascc + ans_dense_ascc
             
             #aff
-            ans_select = aff(ans_cconv, ans_ascc, senders, receivers, rel_pos, self.radius, a=a_ff)
+            ans_select = aff(ans_cconv, ans_ascc, senders, receivers, rel_pos, self.radius, a=a_ff, isTraining=isTraining)
 
             #ResAFF
             if len(ans_convs) == 3 and ans_dense_cconv.shape[-1] == ans_convs[-2].shape[-1]:
-                ans_select = self.resAff(ans_select, ans_convs[-2], senders, receivers, rel_pos, self.radius, a=a_ff)
+                ans_select = self.resAff(ans_select, ans_convs[-2], senders, receivers, rel_pos, self.radius, a=a_ff, isTraining=isTraining)
 
             ans_convs.append(ans_select)
 

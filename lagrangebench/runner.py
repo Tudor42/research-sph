@@ -210,7 +210,7 @@ def setup_model(
     magnitude_features = cfg.model.magnitude_features
 
     if model_name == "gns":
-        def model_fn(x):
+        def model_fn(x, isTraining=False):
             return models.GNS(
                 particle_dimension=metadata["dim"],
                 latent_size=cfg.model.latent_dim,
@@ -218,7 +218,7 @@ def setup_model(
                 num_mp_steps=cfg.model.num_mp_steps,
                 num_particle_types=NodeType.SIZE,
                 particle_type_embedding_size=16,
-            )(x)
+            )(x, isTraining)
 
         MODEL = models.GNS
     elif model_name == "segnn":
@@ -233,7 +233,7 @@ def setup_model(
         # 1o displacement, 0e distance
         edge_feature_irreps = Irreps("1x1o + 1x0e")
 
-        def model_fn(x):
+        def model_fn(x, isTraining=False):
             return models.SEGNN(
                 node_features_irreps=node_feature_irreps,
                 edge_features_irreps=edge_feature_irreps,
@@ -247,7 +247,7 @@ def setup_model(
                 homogeneous_particles=homogeneous_particles,
                 blocks_per_step=cfg.model.num_mlp_layers,
                 norm=cfg.model.segnn_norm,
-            )(x)
+            )(x, isTraining)
 
         MODEL = models.SEGNN
     elif model_name == "egnn":
@@ -260,7 +260,7 @@ def setup_model(
         displacement_fn = jax.vmap(displacement_fn, in_axes=(0, 0))
         shift_fn = jax.vmap(shift_fn, in_axes=(0, 0))
 
-        def model_fn(x):
+        def model_fn(x, isTraining=False):
             return models.EGNN(
                 hidden_size=cfg.model.latent_dim,
                 output_size=1,
@@ -271,14 +271,14 @@ def setup_model(
                 num_mp_steps=cfg.model.num_mp_steps,
                 n_vels=input_seq_length - 1,
                 residual=True,
-            )(x)
+            )(x, isTraining)
 
         MODEL = models.EGNN
     elif model_name == "painn":
         assert magnitude_features, "PaiNN requires magnitudes"
         radius = metadata["default_connectivity_radius"] * 1.5
 
-        def model_fn(x):
+        def model_fn(x, isTraining=False):
             return models.PaiNN(
                 hidden_size=cfg.model.latent_dim,
                 output_size=1,
@@ -286,13 +286,13 @@ def setup_model(
                 radial_basis_fn=models.painn.gaussian_rbf(20, radius, trainable=True),
                 cutoff_fn=models.painn.cosine_cutoff(radius),
                 num_mp_steps=cfg.model.num_mp_steps,
-            )(x)
+            )(x, isTraining)
 
         MODEL = models.PaiNN
     elif model_name == "linear":
 
-        def model_fn(x):
-            return models.Linear(dim_out=metadata["dim"])(x)
+        def model_fn(x, isTraining=False):
+            return models.Linear(dim_out=metadata["dim"])(x, isTraining)
 
         MODEL = models.Linear
     elif model_name == "cconv":
@@ -302,8 +302,8 @@ def setup_model(
         num_particles_max = metadata["num_particles_max"]
         dt_coarse = metadata["write_every"] * metadata["dt"]
         radius = metadata["default_connectivity_radius"]
-        def model_fn(x):
-            return models.MyParticleNetwork(displacement_fn, shift_fn, timestep=dt_coarse, radius=radius, num_particles=num_particles_max)(x)
+        def model_fn(x, isTraining=False):
+            return models.MyParticleNetwork(displacement_fn, shift_fn, timestep=dt_coarse, radius=radius, num_particles=num_particles_max)(x, isTraining)
         MODEL = models.MyParticleNetwork
 
     return model_fn, MODEL

@@ -88,7 +88,7 @@ def _mse(
     case,
     vel_div_loss = False,
 ):
-    pred, state = model_fn(params["model"], state, (features, particle_type))
+    pred, state = model_fn(params["model"], state, (features, particle_type), isTraining=True)
     # check active (non zero) output shapes
     assert all(target[k].shape == pred[k].shape for k in pred)
 
@@ -339,7 +339,7 @@ class Trainer:
         pushforward = cfg_train.pushforward
 
         # Precompile model for evaluation
-        model_apply = jax.jit(model.apply)
+        model_apply = jax.jit(model.apply, static_argnames=("isTraining",))
 
         # loss and update functions
         loss_fn = jax.jit(partial(_mse, model_fn=model_apply, loss_weight=self.loss_weight, case=case, vel_div_loss=vel_div_loss))
@@ -363,7 +363,7 @@ class Trainer:
         else:
             # initialize new model
             key, subkey = jax.random.split(key, 2)
-            params, state = model.init(subkey, (features, particle_type[0]))
+            params, state = model.init(subkey, (features, particle_type[0]), isTraining=True)
             meta = {"raw_logs": jnp.ones((3,))}
             params = {"model": params,
                       "meta": meta,} 

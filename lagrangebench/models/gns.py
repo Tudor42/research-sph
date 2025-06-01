@@ -157,7 +157,7 @@ class GNS(BaseModel):
         return graph, particle_type
 
     def __call__(
-        self, sample: Tuple[Dict[str, jnp.ndarray], jnp.ndarray]
+        self, sample: Tuple[Dict[str, jnp.ndarray], jnp.ndarray], isTraining=False,
     ) -> Dict[str, jnp.ndarray]:
         graph, particle_type = self._transform(*sample)
 
