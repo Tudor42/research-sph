@@ -11,6 +11,7 @@ from jax_sph.jax_md.partition import NeighborList, NeighborListFormat, neighbor_
 from omegaconf import DictConfig, OmegaConf
 
 from jax_sph.kernel import BaseKernel, QuinticKernel
+from jax_sph.utils import Tag
 from lagrangebench.data.utils import get_dataset_stats
 from lagrangebench.defaults import defaults
 from lagrangebench.train.strats import add_gns_noise
@@ -141,6 +142,8 @@ def case_builder(
         magnitude_features=cfg_model.magnitude_features,
         external_force_fn=external_force_fn,
     )
+    dt_coarse = metadata["write_every"] * metadata["dt"]
+    displacement_fn_vmap = vmap(displacement_fn, in_axes=(0, 0))
 
     def _compute_target(pos_input: jnp.ndarray) -> TargetDict:
         # displacement(r1, r2) = r1-r2  # without PBC
@@ -184,6 +187,18 @@ def case_builder(
         # allocate the neighbor list
         most_recent_position = pos_input[:, input_seq_length - 1]
         num_particles = (particle_type != -1).sum()
+
+        if external_force_fn is not None:
+            external_force_field = vmap(external_force_fn, in_axes=(0, None))(most_recent_position, frame_times[input_seq_length-1])
+        else:
+            external_force_field = jnp.zeros((metadata["num_particles_max"], metadata["dim"]))
+
+        if cfg_model.positions_after_forces:
+            vel1 = most_recent_position - pos_input[:, input_seq_length - 1] 
+            vel2_candidate = vel1 + dt_coarse * external_force_field
+            pos2_candidate = shift_fn(most_recent_position, dt_coarse * (vel2_candidate + vel1) / 2.0)
+            most_recent_position = jnp.where((particle_type == Tag.FLUID)[:, None], pos2_candidate, pos_input[:, input_seq_length, :])
+
         if is_allocate:
             neighbors = neighbor_fn.allocate(
                 most_recent_position, num_particles=num_particles
@@ -192,9 +207,30 @@ def case_builder(
             neighbors = neighbors.update(
                 most_recent_position, num_particles=num_particles
             )
+        if not cfg_model.positions_after_forces:
+            # selected features
+            features = feature_transform(pos_input[:, :input_seq_length], neighbors, frame_times[:input_seq_length])
+        else:
+            features = {}
+            features["abs_pos"] = most_recent_position
+            features["vel2_candidates"] = jnp.where((particle_type == Tag.FLUID)[:, None], vel2_candidate, displacement_fn_vmap(most_recent_position, pos_input[:, input_seq_length - 1]))
+            
+            receivers, senders = neighbors.idx
+            features["senders"] = senders
+            features["receivers"] = receivers
+            displacement = displacement_fn_vmap(
+                most_recent_position[receivers], most_recent_position[senders]
+            )
+            normalized_relative_displacements = displacement / metadata["default_connectivity_radius"]
+            features["rel_disp"] = normalized_relative_displacements
+            normalized_relative_distances = space.distance(
+                normalized_relative_displacements
+            )
+            features["rel_dist"] = normalized_relative_distances[:, None]
 
-        # selected features
-        features = feature_transform(pos_input[:, :input_seq_length], neighbors, frame_times[:input_seq_length])
+        if external_force_fn is not None:
+            features["force"] = external_force_field
+       
 
         if mode == "train":
             # compute target acceleration. Inverse of postprocessing step.

@@ -4,6 +4,7 @@ model:
   name: cconv
   input_seq_length: 3
   vel_div_loss: False
+  positions_after_forces: True
 train:
   noise_std: 0.001
   optimizer:

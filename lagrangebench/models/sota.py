@@ -209,7 +209,7 @@ class MyParticleNetwork(BaseModel):
     ) -> Dict[str, jnp.ndarray]:
         features, particle_types = sample
 
-        pos2, vel2 = self.integrate_pos_vel(features["abs_pos"][:,-1,:], features["vel_hist"][:, -2:], particle_types == Tag.FLUID, features["force"])
+        pos2, vel2 = features["abs_pos"], features["vel2_candidates"]
         fluid_mask = particle_types == Tag.FLUID
         fluid_feats = jnp.concatenate([jnp.ones((pos2.shape[0],1)), vel2], axis=-1)
         #box_feat =  jnp.concatenate([jnp.ones((pos2.shape[0],1)), vel2], axis=-1)

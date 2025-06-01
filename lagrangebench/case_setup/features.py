@@ -103,9 +103,6 @@ def physical_feature_builder(
             )
             features["bound"] = normalized_clipped_distance_to_boundaries
 
-        if external_force_fn is not None:
-            external_force_field = vmap(external_force_fn, in_axes=(0, None))(most_recent_position, t[-1])
-            features["force"] = external_force_field
 
         # senders and receivers are integers of shape (E,)
         receivers, senders = nbrs.idx
