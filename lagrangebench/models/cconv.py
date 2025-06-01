@@ -40,7 +40,6 @@ class ASCC(hk.Module):
             init=init
         )
         kernel_flipped = -jnp.flip(kernel, axis=(0,1))
-
         return self.conv_operation(jnp.concatenate([kernel, kernel_flipped], axis=1), receivers, relative_positions, window_support, features, a)
 
 def test_cconv_layer():
