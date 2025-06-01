@@ -155,7 +155,7 @@ class MyParticleNetwork(BaseModel):
         # initial fluid/obstacle conv and dense
         self.conv0_fluid = ConvLayer(3, self.layer_channels[0])
         self.dense0_fluid = hk.Linear(output_size=self.layer_channels[0])
-        self.conv0_obstacle = ConvLayer(4, self.layer_channels[0])
+        self.conv0_obstacle = ConvLayer(3, self.layer_channels[0])
         
         self.convs = []
         self.denses = []
@@ -170,7 +170,7 @@ class MyParticleNetwork(BaseModel):
         self.aff_ascc = IAFF(channels=32, inter_channels=64, num_particles=num_particles, conv_type='ascc')
         self.conv0_fluid_ascc = ConvLayer(3, self.layer_channels[0], conv_type="ascc")
         self.dense0_fluid_ascc = hk.Linear(output_size=self.layer_channels[0])
-        self.conv0_obstacle_ascc = ConvLayer(4, self.layer_channels[0], conv_type="ascc")
+        self.conv0_obstacle_ascc = ConvLayer(3, self.layer_channels[0], conv_type="ascc")
 
         self.convs_ascc = []
         self.denses_ascc = []
@@ -210,10 +210,14 @@ class MyParticleNetwork(BaseModel):
         features, particle_types = sample
 
         pos2, vel2 = self.integrate_pos_vel(features["abs_pos"][:,-1,:], features["vel_hist"][:, -2:], particle_types == Tag.FLUID, features["force"])
-        
+        fluid_mask = particle_types == Tag.FLUID
         fluid_feats = jnp.concatenate([jnp.ones((pos2.shape[0],1)), vel2], axis=-1)
-        box_feat = jnp.concatenate([pos2, vel2], axis=-1)
+        #box_feat =  jnp.concatenate([jnp.ones((pos2.shape[0],1)), vel2], axis=-1)
+        #fm = fluid_mask[:, None]  # shape: (num_particles, 1)
         
+        # Keep only “fluid” rows; set wall‐rows to zero:
+        fluid_feats = jnp.where(fluid_mask[:, None], fluid_feats, 0.0)
+        box_feat   = jnp.where(fluid_mask[:, None], 0.0,   fluid_feats)
         senders, receivers = features["senders"], features["receivers"]
         
         rel_pos = self.displ_fn(pos2[senders], pos2[receivers]) / self.radius
@@ -226,21 +230,21 @@ class MyParticleNetwork(BaseModel):
         # first conv0
         ans_f = self.conv0_fluid(fluid_feats[senders], receivers, rel_pos, self.radius, a=a_ff)
         ans_d = self.dense0_fluid(fluid_feats)
-        obs_f = self.conv0_obstacle(box_feat[senders], receivers, rel_pos, self.radius, a=a_fw)
+        obs_f = self.conv0_obstacle(fluid_feats[senders], receivers, rel_pos, self.radius, a=a_fw)
         hybrid = self.aff_cconv(ans_f, obs_f, senders, receivers, rel_pos, self.radius, a=a_ff)
         feats = jnp.concatenate([hybrid, ans_d], axis=-1)
         
         # ascc
         ans_f_ascc = self.conv0_fluid_ascc(fluid_feats[senders], receivers, rel_pos, self.radius, a=a_ff)
         ans_d_ascc = self.dense0_fluid_ascc(fluid_feats)
-        obs_f_ascc = self.conv0_obstacle_ascc(box_feat[senders], receivers, rel_pos, self.radius, a=a_fw)
+        obs_f_ascc = self.conv0_obstacle_ascc(fluid_feats[senders], receivers, rel_pos, self.radius, a=a_fw)
         hybrid_ascc = self.aff_ascc(ans_f_ascc, obs_f_ascc, senders, receivers, rel_pos, self.radius, a=a_ff)
         feats_ascc = jnp.concatenate([hybrid_ascc, ans_d_ascc], axis=-1)
 
         feats_select = self.aff0(feats, feats_ascc, senders, receivers, rel_pos, self.radius, a=a_ff)
 
         ans_convs = [feats_select]
-
+        
         for conv_cconv, dense_cconv, conv_ascc, dense_ascc, aff in zip(self.convs, self.denses, self.convs_ascc, self.denses_ascc, self.affs):
             inp_feats = jax.nn.relu(ans_convs[-1])
             #cconv
@@ -257,4 +261,6 @@ class MyParticleNetwork(BaseModel):
             if len(ans_convs) == 3 and ans_dense_cconv.shape[-1] == ans_convs[-2].shape[-1]:
                 ans_select = self.resAff(ans_select, ans_convs[-2], senders, receivers, rel_pos, self.radius, a=a_ff)
             ans_convs.append(ans_select)
+        # jax.debug.print("should not change features 1 {} {}", jnp.sum(jnp.where((particle_types != Tag.FLUID) & (jnp.sum(ans_convs[-1], axis=1) == 0.0), 1.0, 0.0)), jnp.sum(particle_types != Tag.FLUID))
+        
         return {"pos": pos2 + ans_convs[-1] / 128.0}
