@@ -6,7 +6,7 @@ model:
   vel_div_loss: False
   positions_after_forces: True
 train:
-  noise_std: 0.001
+  noise_std: 0.0
   optimizer:
     lr_start: 5.e-4
   loss_weight:

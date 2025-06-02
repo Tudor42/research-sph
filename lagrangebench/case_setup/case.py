@@ -194,7 +194,7 @@ def case_builder(
             external_force_field = jnp.zeros((metadata["num_particles_max"], metadata["dim"]))
 
         if cfg_model.positions_after_forces:
-            vel1 = most_recent_position - pos_input[:, input_seq_length - 2] 
+            vel1 = (most_recent_position - pos_input[:, input_seq_length - 2]) / dt_coarse
             vel2_candidate = vel1 + dt_coarse * external_force_field
             pos2_candidate = shift_fn(most_recent_position, dt_coarse * (vel2_candidate + vel1) / 2.0)
             most_recent_position = jnp.where((particle_type == Tag.FLUID)[:, None], pos2_candidate, pos_input[:, input_seq_length, :])
@@ -211,15 +211,17 @@ def case_builder(
             # selected features
             features = feature_transform(pos_input[:, :input_seq_length], neighbors, frame_times[:input_seq_length])
         else:
-            # velocity_stats = normalization_stats["velocity"]
+            velocity_stats = normalization_stats["velocity"]
 
             features = {}
             features["abs_pos"] = most_recent_position
             features["vel2_candidates"] = jnp.where((particle_type == Tag.FLUID)[:, None], vel2_candidate, displacement_fn_vmap(most_recent_position, pos_input[:, input_seq_length - 1]))        
+            # features["vel2_candidates"] = (jnp.where((particle_type == Tag.FLUID)[:, None], vel2_candidate, displacement_fn_vmap(most_recent_position, pos_input[:, input_seq_length - 1])) - velocity_stats["mean"]) / velocity_stats["std"]
+
             receivers, senders = neighbors.idx
             features["senders"] = senders
             features["receivers"] = receivers
-            most_recent_position = jnp.where((particle_type == Tag.FLUID)[:, None], most_recent_position, pos_input[:, input_seq_length - 1, :]) # for wall particles use previous position to compute displacement 
+            # most_recent_position = jnp.where((particle_type == Tag.FLUID)[:, None], most_recent_position, pos_input[:, input_seq_length - 1, :]) # for wall particles use previous position to compute displacement 
 
             displacement = displacement_fn_vmap(
                 most_recent_position[senders], most_recent_position[receivers]
@@ -231,6 +233,12 @@ def case_builder(
             )
             features["rel_dist"] = normalized_relative_distances[:, None]
 
+            displacement = displacement_fn_vmap(
+                 pos_input[:, input_seq_length - 1][senders], pos_input[:, input_seq_length - 1][receivers]
+            )
+            normalized_relative_displacements = displacement / metadata["default_connectivity_radius"]
+            features["rel_disp_from_prev_time"] = normalized_relative_displacements
+            
         if external_force_fn is not None:
             features["force"] = external_force_field
        

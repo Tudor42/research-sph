@@ -210,7 +210,7 @@ class MyParticleNetwork(BaseModel):
         senders, receivers = features["senders"], features["receivers"]
         
         rel_pos = features["rel_disp"]
-        box_sender_feats = jnp.concatenate([rel_pos, box_feat[senders]], axis=-1)
+        box_sender_feats = jnp.concatenate([features["rel_disp_from_prev_time"], box_feat[senders]], axis=-1)
 
         
         fw_mask = ((particle_types[senders] == Tag.MOVING_WALL) | (particle_types[senders] == Tag.SOLID_WALL) | (particle_types[senders] == Tag.DIRICHLET_WALL)) & (particle_types[receivers] == Tag.FLUID) & (receivers != senders)
@@ -266,5 +266,11 @@ class MyParticleNetwork(BaseModel):
                 ans_select = self.resAff(ans_select, ans_convs[-2], senders, receivers, rel_pos, self.radius, a=a_ff, isTraining=isTraining)
 
             ans_convs.append(ans_select)
-
-        return {"pos": pos2 + ans_convs[-1] / 128.0}
+        #jax.debug.print("corrections mean magnitude {}", jnp.sum(jnp.linalg.norm(ans_convs[-1], ord=2, axis=1)) / jnp.sum(fluid_mask[:, 0]))
+        s = hk.get_parameter(
+            "out_scale",             
+            shape=(),                 
+            init=hk.initializers.Constant(1/109.37)
+        )
+        #jax.debug.print("s={}", s)
+        return {"pos": pos2 + s*ans_convs[-1]}
