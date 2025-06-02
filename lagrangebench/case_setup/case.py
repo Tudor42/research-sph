@@ -211,15 +211,16 @@ def case_builder(
             # selected features
             features = feature_transform(pos_input[:, :input_seq_length], neighbors, frame_times[:input_seq_length])
         else:
-            velocity_stats = normalization_stats["velocity"]
+            # velocity_stats = normalization_stats["velocity"]
 
             features = {}
             features["abs_pos"] = most_recent_position
-            features["vel2_candidates"] = (jnp.where((particle_type == Tag.FLUID)[:, None], vel2_candidate, displacement_fn_vmap(most_recent_position, pos_input[:, input_seq_length - 1]))- velocity_stats["mean"]) / velocity_stats["std"]
-            
+            features["vel2_candidates"] = jnp.where((particle_type == Tag.FLUID)[:, None], vel2_candidate, displacement_fn_vmap(most_recent_position, pos_input[:, input_seq_length - 1]))        
             receivers, senders = neighbors.idx
             features["senders"] = senders
             features["receivers"] = receivers
+            most_recent_position = jnp.where((particle_type == Tag.FLUID)[:, None], most_recent_position, pos_input[:, input_seq_length - 1, :]) # for wall particles use previous position to compute displacement 
+
             displacement = displacement_fn_vmap(
                 most_recent_position[senders], most_recent_position[receivers]
             )
