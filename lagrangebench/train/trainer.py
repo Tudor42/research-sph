@@ -36,26 +36,28 @@ from ..utils_extra.continous_convolution import window_poly6
 def compute_divergence_loss(new_pos, vels, senders, receivers, case, non_kinematic_mask, mass):    
     disp  = jax.vmap(case.displacement, in_axes=(0,0))(new_pos[senders], new_pos[receivers]) 
     vel_diff = vels[senders] - vels[receivers]
-    mask_out_self_edges = (senders != receivers)
-    
+
     rad_vel = jnp.einsum('ed,ed->e', vel_diff, disp)            # (E_max,)
-    r2      = jnp.einsum('ed,ed->e', disp, disp)            # (E_max,)
+    r2      = jnp.sqrt(jnp.einsum('ed,ed->e', disp, disp))      # (E_max,)
+
+    
     
     grad_w     = jnp.where(
-                (r2>0.0)&(r2<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
+                (r2>0.0)&(r2<case.metadata["default_connectivity_radius"]),
                 jax.vmap(case.kernel.grad_w)(r2),
                 0.0
              )
-
     grad_w  = jax.lax.stop_gradient(grad_w)
     
-    w = jnp.where((r2>0.0)&(r2<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
+    w = jnp.where((r2>0.0)&(r2<case.metadata["default_connectivity_radius"]),
                   case.kernel.w(r2),
                   0.0
                  )
     w = jax.lax.stop_gradient(w)
-    densities = jax.ops.segment_sum(w, receivers, num_segments=case.metadata["num_particles_max"])
 
+    densities = mass * jax.ops.segment_sum(w, receivers, num_segments=case.metadata["num_particles_max"])
+    #dens_deviation = jnp.where(non_kinematic_mask, densities - 1.0, 0.0) 
+    
     dens_edge = densities[senders]
 
     inv_dens   = jnp.where(dens_edge > 0.0,
@@ -63,15 +65,25 @@ def compute_divergence_loss(new_pos, vels, senders, receivers, case, non_kinemat
                        0.0)
     
     rad_vel_dens = jnp.einsum('e,e->e', inv_dens, rad_vel)
+    rad_vel_dens = jnp.where((r2>0.0)&(r2<case.metadata["default_connectivity_radius"]),
+                             rad_vel_dens / r2,
+                             0.0)
     
     div_approx = jax.ops.segment_sum(grad_w * rad_vel_dens, receivers, num_segments=case.metadata["num_particles_max"]) # / jnp.sum(densities) # (N,)
     div_approx = jnp.where(non_kinematic_mask, div_approx, 0.0)
+
+    neighbor = jnp.where((r2 > 0.0) & (r2 < case.metadata["default_connectivity_radius"]) & non_kinematic_mask[receivers], 1.0, 0.0)
+
+    neighbors_count = jax.ops.segment_sum(neighbor, receivers, num_segments=case.metadata["num_particles_max"])
+    neighbors_count = jnp.exp(0.5 * jnp.where(non_kinematic_mask, neighbors_count, 0))
+    weights = neighbors_count / jnp.sum(neighbors_count)
+    weighted_div_approx =  weights * div_approx
     
-    weighted_div_approx = jnp.where(non_kinematic_mask, densities, 0.0) * div_approx
-    
+    mask_out_self_edges = (senders != receivers)
     min_dist = case.metadata["dx"]
     
-    return jnp.sum(div_approx ** 2), min_dist * jnp.sum(jnp.where(mask_out_self_edges & non_kinematic_mask[receivers], jnp.clip((min_dist - r2) / min_dist, 0.0, 1.0), 0.0))
+    return jnp.sum(weighted_div_approx ** 2), min_dist * jnp.sum(jnp.where(mask_out_self_edges & non_kinematic_mask[receivers], jnp.clip((min_dist - r2) / min_dist, 0.0, 1.0), 0.0))
+    # return jnp.sum(div_approx ** 2), jnp.sum((weights * dens_deviation)**2)
     
     
 
@@ -118,14 +130,14 @@ def _mse(
 
         div_loss, proximity_loss = compute_divergence_loss(new_pos, vels_pred, features["senders"], features["receivers"], case, non_kinematic_mask, case.metadata["dx"] ** case.metadata["dim"])
 
-        div_loss = div_loss
+        div_loss = div_loss # / num_non_kinematic
         proximity_loss = proximity_loss / num_non_kinematic
         # jax.debug.print("div_loss={}", div_loss)
         precision = params["meta"]["raw_logs"]
         weights = 0.5 * jnp.exp(-precision)
         precision = precision / 2
        
-        total_loss = jnp.sum(weights * jnp.array([0.5 * total_loss, 1e+8 * div_loss, 1e+1 * proximity_loss]) + precision)
+        total_loss = jnp.sum(weights * jnp.array([total_loss, div_loss, proximity_loss]) + precision)
 
     return total_loss, (state, jnp.array([data_loss, div_loss, proximity_loss]))
 

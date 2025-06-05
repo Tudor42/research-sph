@@ -14,13 +14,14 @@ class CConvLayer(hk.Module):
 
     def __call__(self, features, receivers: jnp.ndarray, relative_positions: jnp.ndarray, window_support, a) -> jnp.ndarray:
         kh, kw = self.kernel_size
-        init = hk.initializers.VarianceScaling(1.0, "fan_avg", "truncated_normal")
+        init = hk.initializers.RandomUniform(minval=-0.05, maxval=0.05)
         kernel = hk.get_parameter(
             "kernel",
             shape=(kh, kw, self.in_ch, self.out_ch),
             init=init
         )
-        return self.conv_operation(kernel, receivers, relative_positions, window_support, features, a)
+        bias = hk.get_parameter("bias", shape=(self.out_ch,), init=jnp.zeros)
+        return self.conv_operation(kernel, receivers, relative_positions, window_support, features, a) + bias
 
 class ASCC(hk.Module):
     def __init__(self, in_ch: int, out_ch: int, kernel_size=(4, 4), aggregation_points=4, name=None):
@@ -33,14 +34,15 @@ class ASCC(hk.Module):
 
     def __call__(self, features, receivers: jnp.ndarray, relative_positions: jnp.ndarray, window_support, a) -> jnp.ndarray:
         kh, kw = self.kernel_size
-        init = hk.initializers.VarianceScaling(1.0, "fan_avg", "truncated_normal")
+        init = hk.initializers.RandomUniform(minval=-0.05, maxval=0.05)
         kernel = hk.get_parameter(
             "kernel",
             shape=(kh, kw, self.in_ch, self.out_ch),
             init=init
         )
+        bias = hk.get_parameter("bias", shape=(self.out_ch,), init=jnp.zeros)
         kernel_flipped = -jnp.flip(kernel, axis=(0,1))
-        return self.conv_operation(jnp.concatenate([kernel, kernel_flipped], axis=1), receivers, relative_positions, window_support, features, a)
+        return self.conv_operation(jnp.concatenate([kernel, kernel_flipped], axis=1), receivers, relative_positions, window_support, features, a) + bias
 
 def test_cconv_layer():
     # Define dummy data

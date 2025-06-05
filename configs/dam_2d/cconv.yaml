@@ -3,13 +3,16 @@ extends: configs/dam_2d/base.yaml
 model: 
   name: cconv
   input_seq_length: 3
-  vel_div_loss: False
+  vel_div_loss: True
   positions_after_forces: True
+  mask_self: True
 train:
-  noise_std: 0.0
+  noise_std: 0.001
   optimizer:
     lr_start: 5.e-4
   loss_weight:
     pos: 1.0
     vel: 0.0
     acc: 0.0
+  pushforward:
+    steps: [-1, 20000, 50000, 100000]

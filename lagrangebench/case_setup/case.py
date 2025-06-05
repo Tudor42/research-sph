@@ -127,7 +127,7 @@ def case_builder(
         backend=cfg_neighbors.backend,
         r_cutoff=metadata["default_connectivity_radius"],
         capacity_multiplier=cfg_neighbors.multiplier,
-        mask_self=False,
+        mask_self=cfg_model.mask_self,
         format=NeighborListFormat.Sparse,
         num_particles_max=metadata["num_particles_max"],
         pbc=metadata["periodic_boundary_conditions"],
@@ -144,6 +144,7 @@ def case_builder(
     )
     dt_coarse = metadata["write_every"] * metadata["dt"]
     displacement_fn_vmap = vmap(displacement_fn, in_axes=(0, 0))
+    displacement_fn_dvmap = vmap(displacement_fn_vmap, in_axes=(0, 0))
 
     def _compute_target(pos_input: jnp.ndarray) -> TargetDict:
         # displacement(r1, r2) = r1-r2  # without PBC
@@ -214,7 +215,7 @@ def case_builder(
             velocity_stats = normalization_stats["velocity"]
 
             features = {}
-            features["abs_pos"] = most_recent_position
+            features["abs_pos"] = most_recent_position[:, None]
             features["vel2_candidates"] = jnp.where((particle_type == Tag.FLUID)[:, None], vel2_candidate, displacement_fn_vmap(most_recent_position, pos_input[:, input_seq_length - 1]))        
             # features["vel2_candidates"] = (jnp.where((particle_type == Tag.FLUID)[:, None], vel2_candidate, displacement_fn_vmap(most_recent_position, pos_input[:, input_seq_length - 1])) - velocity_stats["mean"]) / velocity_stats["std"]
 
@@ -234,7 +235,7 @@ def case_builder(
             features["rel_dist"] = normalized_relative_distances[:, None]
 
             displacement = displacement_fn_vmap(
-                 pos_input[:, input_seq_length - 1][senders], pos_input[:, input_seq_length - 1][receivers]
+                 pos_input[senders, input_seq_length - 1], pos_input[receivers, input_seq_length - 1]
             )
             normalized_relative_displacements = displacement / metadata["default_connectivity_radius"]
             features["rel_disp_from_prev_time"] = normalized_relative_displacements

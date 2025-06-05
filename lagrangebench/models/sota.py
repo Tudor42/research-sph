@@ -25,6 +25,7 @@ class AFF(hk.Module):
             self.ConvLayer = CConvLayer
         else:
             self.ConvLayer = ASCC
+        self.conv_type = conv_type
         self.cconv1 = self.ConvLayer(
             in_ch=channels*2,
             out_ch=inter_channels,
@@ -52,13 +53,18 @@ class AFF(hk.Module):
         isTraining=False
     ) -> jnp.ndarray:
         xa = jnp.concatenate([x, y], axis=-1)
-        
-        xl = self.cconv1(xa[senders], receivers, rel_pos, window_support, a)
+        if self.conv_type == "cconv":
+            inp_feat = xa[senders]
+        else:
+            inp_feat = xa[senders] + xa[receivers]
+        xl = self.cconv1(inp_feat, receivers, rel_pos, window_support, a)
         xl = self.bn1(xl, is_training=isTraining)
         xl = jax.nn.relu(xl)
-
-        xl = self.cconv2(xl[senders], receivers, rel_pos, window_support, a)
-
+        if self.conv_type == "cconv":
+            inp_feat = xl[senders]
+        else:
+            inp_feat = xl[senders] + xl[receivers]
+        xl = self.cconv2(inp_feat, receivers, rel_pos, window_support, a)
         xl = self.bn2(xl, is_training=isTraining)
         wei = jax.nn.sigmoid(xl)
         
@@ -82,6 +88,7 @@ class IAFF(hk.Module):
             self.ConvLayer = CConvLayer
         else:
             self.ConvLayer = ASCC
+        self.conv_type = conv_type
         # first AFF block
         self.cconv1 = self.ConvLayer(2*channels, inter_channels, kernel_size=(4,4), aggregation_points=num_particles)
         self.bn1 = hk.BatchNorm(create_scale=True, create_offset=True, decay_rate=0.9)
@@ -106,19 +113,38 @@ class IAFF(hk.Module):
     ) -> jnp.ndarray:
         xa = jnp.concatenate([x, y], axis=-1)
         # first AFF
-        xl = self.cconv1(xa[senders], receivers, rel_pos, window_support, a)
+
+        if self.conv_type == "cconv":
+            inp_feat = xa[senders]
+        else:
+            inp_feat = xa[senders] + xa[receivers]
+        
+        xl = self.cconv1(inp_feat, receivers, rel_pos, window_support, a)
         xl = self.bn1(xl, is_training=isTraining)
         xl = jax.nn.relu(xl)
-
-        xl = self.cconv2(xl[senders], receivers, rel_pos, window_support, a)
+        
+        if self.conv_type == "cconv":
+            inp_feat = xl[senders]
+        else:
+            inp_feat = xl[senders] + xl[receivers]
+        xl = self.cconv2(inp_feat, receivers, rel_pos, window_support, a)
         xl = self.bn2(xl, is_training=isTraining)
         wei1 = jax.nn.sigmoid(xl)
         xo = 2.0 * x * wei1 + 2.0 * y * (1.0 - wei1)
         # second AFF
-        xl2 = self.cconv3(xo[senders], receivers, rel_pos, window_support, a)
+        if self.conv_type == "cconv":
+            inp_feat = xo[senders]
+        else:
+            inp_feat = xo[senders] + xo[receivers]
+        xl2 = self.cconv3(inp_feat, receivers, rel_pos, window_support, a)
         xl2 = self.bn3(xl2, is_training=isTraining)
         xl2 = jax.nn.relu(xl2)
-        xl2 = self.cconv4(xl2[senders], receivers, rel_pos, window_support, a)
+
+        if self.conv_type == "cconv":
+            inp_feat = xl2[senders]
+        else:
+            inp_feat = xl2[senders] + xl2[receivers]
+        xl2 = self.cconv4(inp_feat, receivers, rel_pos, window_support, a)
         xl2 = self.bn4(xl2, is_training=isTraining)
         wei2 = jax.nn.sigmoid(xl2)
         return 2.0 * x * wei2 + 2.0 * y * (1.0 - wei2)
@@ -157,7 +183,7 @@ class MyParticleNetwork(BaseModel):
         # initial fluid/obstacle conv and dense
         self.conv0_fluid = ConvLayer(3, self.layer_channels[0])
         self.dense0_fluid = hk.Linear(output_size=self.layer_channels[0])
-        self.conv0_obstacle = ConvLayer(4, self.layer_channels[0])
+        self.conv0_obstacle = ConvLayer(5, self.layer_channels[0])
         
         self.convs = []
         self.denses = []
@@ -172,7 +198,7 @@ class MyParticleNetwork(BaseModel):
         self.aff_ascc = IAFF(channels=32, inter_channels=64, num_particles=num_particles, conv_type='ascc')
         self.conv0_fluid_ascc = ConvLayer(3, self.layer_channels[0], conv_type="ascc")
         self.dense0_fluid_ascc = hk.Linear(output_size=self.layer_channels[0])
-        self.conv0_obstacle_ascc = ConvLayer(4, self.layer_channels[0], conv_type="ascc")
+        self.conv0_obstacle_ascc = ConvLayer(5, self.layer_channels[0], conv_type="ascc")
 
         self.convs_ascc = []
         self.denses_ascc = []
@@ -197,12 +223,12 @@ class MyParticleNetwork(BaseModel):
     ) -> Dict[str, jnp.ndarray]:
         features, particle_types = sample
 
-        pos2, vel2 = features["abs_pos"], features["vel2_candidates"]
+        pos2, vel2 = features["abs_pos"][:, 0], features["vel2_candidates"]
         fluid_mask = particle_types == Tag.FLUID
         fluid_mask = fluid_mask[..., None]  
         
         fluid_feats = jnp.concatenate([jnp.ones((pos2.shape[0],1)), vel2], axis=-1)
-        box_feat = vel2
+        box_feat = jnp.concatenate([2*jnp.ones((pos2.shape[0],1)), vel2], axis=-1)
         #fm = fluid_mask[:, None]  # shape: (num_particles, 1)
         
         fluid_feats = jnp.where(fluid_mask, fluid_feats, 0.0)
@@ -228,11 +254,9 @@ class MyParticleNetwork(BaseModel):
         feats = jnp.concatenate([hybrid, ans_d], axis=-1)
         
         # ascc
-        ans_f_ascc = self.conv0_fluid_ascc(fluid_feats[senders], receivers, rel_pos, self.radius, a=a_ff)
-        
+        ans_f_ascc = self.conv0_fluid_ascc(fluid_feats[senders] + fluid_feats[receivers], receivers, rel_pos, self.radius, a=a_ff)
         ans_d_ascc = self.dense0_fluid_ascc(fluid_feats)
         ans_d_ascc = jnp.where(fluid_mask, ans_d_ascc, 0.0)
-        
         obs_f_ascc = self.conv0_obstacle_ascc(box_sender_feats, receivers, rel_pos, self.radius, a=a_fw)
         hybrid_ascc = self.aff_ascc(ans_f_ascc, obs_f_ascc, senders, receivers, rel_pos, self.radius, a=a_ff, isTraining=isTraining)
         feats_ascc = jnp.concatenate([hybrid_ascc, ans_d_ascc], axis=-1)
@@ -252,7 +276,7 @@ class MyParticleNetwork(BaseModel):
             ans_cconv = ans_conv_cconv + ans_dense_cconv
             
             #ascc
-            ans_conv_ascc = conv_ascc(inp_feats[senders], receivers, rel_pos, self.radius, a=a_ff)
+            ans_conv_ascc = conv_ascc(inp_feats[senders] + inp_feats[receivers], receivers, rel_pos, self.radius, a=a_ff)
             ans_dense_ascc = dense_ascc(inp_feats)
             ans_dense_ascc = jnp.where(fluid_mask, ans_dense_ascc, 0.0)
 

@@ -51,7 +51,9 @@ def set_defaults(cfg: DictConfig = OmegaConf.create({})) -> DictConfig:
     cfg.model.magnitude_features = False
     #  whether to normalize dimensions equally
     cfg.model.isotropic_norm = False
-
+    cfg.model.mask_self = False
+    cfg.model.positions_after_forces = False
+    cfg.model.vel_div_loss = False
     # SEGNN only parameters
     # steerable attributes level
     cfg.model.lmax_attributes = 1
