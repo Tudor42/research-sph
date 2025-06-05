@@ -303,7 +303,7 @@ def setup_model(
         dt_coarse = metadata["write_every"] * metadata["dt"]
         radius = metadata["default_connectivity_radius"]
         def model_fn(x, isTraining=False):
-            return models.MyParticleNetwork(displacement_fn, shift_fn, timestep=dt_coarse, radius=radius, num_particles=num_particles_max)(x, isTraining)
+            return models.MyParticleNetwork(radius=radius, num_particles=num_particles_max)(x, isTraining)
         MODEL = models.MyParticleNetwork
 
     return model_fn, MODEL

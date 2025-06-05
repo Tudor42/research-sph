@@ -16,9 +16,8 @@ mapping_function_batched = batched_mapping(ball_to_cube_2d)
 window_function_batched = batched_mapping(window_poly6)
 
 @partial(jax.jit, static_argnames=["aggregate_points"])
-def continous_conv_operation(kernel, receivers, relative_positions, window_support, features, a, aggregate_points, window_function=window_poly6, normalize=False):
+def continous_conv_operation(kernel, receivers, relative_positions, features, a, aggregate_points, window_function=window_poly6, normalize=False):
     mapped_positions = mapping_function_batched(relative_positions)
-    # a = window_function_batched(jnp.linalg.norm(relative_positions, ord=2, axis=1) / window_support) * mask
     R, _, ChIn, ChOut = kernel.shape
     norm_coeff = jax.lax.cond(normalize, lambda: jnp.sum(a), lambda: jnp.array(1.0, dtype=a.dtype))
     patch_matrix = bilinear_interpolate_features(R, mapped_positions, features, receivers, a, norm_coeff, aggregate_points)

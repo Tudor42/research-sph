@@ -112,8 +112,6 @@ kernel = jnp.stack([
 #   - We need to reshape into (2, 2, 1, 2). So insert ChIn=1 dimension:
 kernel = kernel.reshape((2, 2, 1, 2))
 
-# 4.6) window_support is unused in our test, pass any positive number
-window_support = 1.0
 
 # 4.7) aggregate_points = num_receivers = 4
 aggregate_points = num_receivers
@@ -128,7 +126,6 @@ output = continous_conv_operation(
     kernel,
     receivers,
     relative_positions,
-    window_support,
     features[senders],
     a,
     aggregate_points,
