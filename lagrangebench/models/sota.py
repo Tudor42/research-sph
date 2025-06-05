@@ -48,7 +48,6 @@ class AFF(hk.Module):
         senders,
         receivers,
         rel_pos: jnp.ndarray,
-        window_support,
         a,
         isTraining=False
     ) -> jnp.ndarray:
@@ -57,14 +56,14 @@ class AFF(hk.Module):
             inp_feat = xa[senders]
         else:
             inp_feat = xa[senders] + xa[receivers]
-        xl = self.cconv1(inp_feat, receivers, rel_pos, window_support, a)
+        xl = self.cconv1(inp_feat, receivers, rel_pos, a)
         xl = self.bn1(xl, is_training=isTraining)
         xl = jax.nn.relu(xl)
         if self.conv_type == "cconv":
             inp_feat = xl[senders]
         else:
             inp_feat = xl[senders] + xl[receivers]
-        xl = self.cconv2(inp_feat, receivers, rel_pos, window_support, a)
+        xl = self.cconv2(inp_feat, receivers, rel_pos, a)
         xl = self.bn2(xl, is_training=isTraining)
         wei = jax.nn.sigmoid(xl)
         
@@ -107,7 +106,6 @@ class IAFF(hk.Module):
         senders,
         receivers,
         rel_pos: jnp.ndarray,
-        window_support,
         a,
         isTraining=False
     ) -> jnp.ndarray:
@@ -119,7 +117,7 @@ class IAFF(hk.Module):
         else:
             inp_feat = xa[senders] + xa[receivers]
         
-        xl = self.cconv1(inp_feat, receivers, rel_pos, window_support, a)
+        xl = self.cconv1(inp_feat, receivers, rel_pos, a)
         xl = self.bn1(xl, is_training=isTraining)
         xl = jax.nn.relu(xl)
         
@@ -127,7 +125,7 @@ class IAFF(hk.Module):
             inp_feat = xl[senders]
         else:
             inp_feat = xl[senders] + xl[receivers]
-        xl = self.cconv2(inp_feat, receivers, rel_pos, window_support, a)
+        xl = self.cconv2(inp_feat, receivers, rel_pos, a)
         xl = self.bn2(xl, is_training=isTraining)
         wei1 = jax.nn.sigmoid(xl)
         xo = 2.0 * x * wei1 + 2.0 * y * (1.0 - wei1)
@@ -136,7 +134,7 @@ class IAFF(hk.Module):
             inp_feat = xo[senders]
         else:
             inp_feat = xo[senders] + xo[receivers]
-        xl2 = self.cconv3(inp_feat, receivers, rel_pos, window_support, a)
+        xl2 = self.cconv3(inp_feat, receivers, rel_pos, a)
         xl2 = self.bn3(xl2, is_training=isTraining)
         xl2 = jax.nn.relu(xl2)
 
@@ -144,7 +142,7 @@ class IAFF(hk.Module):
             inp_feat = xl2[senders]
         else:
             inp_feat = xl2[senders] + xl2[receivers]
-        xl2 = self.cconv4(inp_feat, receivers, rel_pos, window_support, a)
+        xl2 = self.cconv4(inp_feat, receivers, rel_pos, a)
         xl2 = self.bn4(xl2, is_training=isTraining)
         wei2 = jax.nn.sigmoid(xl2)
         return 2.0 * x * wei2 + 2.0 * y * (1.0 - wei2)
@@ -158,21 +156,15 @@ class MyParticleNetwork(BaseModel):
     """
     def __init__(
         self,
-        displ_fn,
-        shift_fn,
         kernel_size=(4,4),
         radius: float = 0.025,
-        timestep: float = 1/50,
         num_particles: int = 0,
         name=None,
     ):
         super().__init__(name=name)
-        self.displ_fn = displ_fn
-        self.shift_fn = shift_fn
         self.layer_channels = [32, 64, 128, 64, 2]
         self.kernel_size = tuple(kernel_size)
         self.radius = radius
-        self.timestep = timestep
         self.num_particles = num_particles
         def ConvLayer(in_ch, out_ch, conv_type='cconv'):
             return (CConvLayer if conv_type=='cconv' else ASCC)(
@@ -245,23 +237,23 @@ class MyParticleNetwork(BaseModel):
         a_fw = jnp.where(fw_mask, w, jnp.array(0.0, dtype=rel_pos.dtype))
         a_ff = jnp.where(ff_mask, w, jnp.array(0.0, dtype=rel_pos.dtype))
         # first conv0
-        ans_f = self.conv0_fluid(fluid_feats[senders], receivers, rel_pos, self.radius, a=a_ff)
+        ans_f = self.conv0_fluid(fluid_feats[senders], receivers, rel_pos, a=a_ff)
         ans_d = self.dense0_fluid(fluid_feats)
         ans_d = jnp.where(fluid_mask, ans_d, 0.0)
 
-        obs_f = self.conv0_obstacle(box_sender_feats, receivers, rel_pos, self.radius, a=a_fw)
-        hybrid = self.aff_cconv(ans_f, obs_f, senders, receivers, rel_pos, self.radius, a=a_ff, isTraining=isTraining)
+        obs_f = self.conv0_obstacle(box_sender_feats, receivers, rel_pos, a=a_fw)
+        hybrid = self.aff_cconv(ans_f, obs_f, senders, receivers, rel_pos, a=a_ff, isTraining=isTraining)
         feats = jnp.concatenate([hybrid, ans_d], axis=-1)
         
         # ascc
-        ans_f_ascc = self.conv0_fluid_ascc(fluid_feats[senders] + fluid_feats[receivers], receivers, rel_pos, self.radius, a=a_ff)
+        ans_f_ascc = self.conv0_fluid_ascc(fluid_feats[senders] + fluid_feats[receivers], receivers, rel_pos, a=a_ff)
         ans_d_ascc = self.dense0_fluid_ascc(fluid_feats)
         ans_d_ascc = jnp.where(fluid_mask, ans_d_ascc, 0.0)
-        obs_f_ascc = self.conv0_obstacle_ascc(box_sender_feats, receivers, rel_pos, self.radius, a=a_fw)
-        hybrid_ascc = self.aff_ascc(ans_f_ascc, obs_f_ascc, senders, receivers, rel_pos, self.radius, a=a_ff, isTraining=isTraining)
+        obs_f_ascc = self.conv0_obstacle_ascc(box_sender_feats, receivers, rel_pos, a=a_fw)
+        hybrid_ascc = self.aff_ascc(ans_f_ascc, obs_f_ascc, senders, receivers, rel_pos, a=a_ff, isTraining=isTraining)
         feats_ascc = jnp.concatenate([hybrid_ascc, ans_d_ascc], axis=-1)
 
-        feats_select = self.aff0(feats, feats_ascc, senders, receivers, rel_pos, self.radius, a=a_ff, isTraining=isTraining)
+        feats_select = self.aff0(feats, feats_ascc, senders, receivers, rel_pos, a=a_ff, isTraining=isTraining)
 
         ans_convs = [feats_select]
         
@@ -269,25 +261,25 @@ class MyParticleNetwork(BaseModel):
             inp_feats = jnp.where(fluid_mask, jax.nn.relu(ans_convs[-1]), 0.0)
         
             #cconv
-            ans_conv_cconv = conv_cconv(inp_feats[senders], receivers, rel_pos, self.radius, a=a_ff)
+            ans_conv_cconv = conv_cconv(inp_feats[senders], receivers, rel_pos, a=a_ff)
             ans_dense_cconv = dense_cconv(inp_feats)
             ans_dense_cconv = jnp.where(fluid_mask, ans_dense_cconv, 0.0)
             
             ans_cconv = ans_conv_cconv + ans_dense_cconv
             
             #ascc
-            ans_conv_ascc = conv_ascc(inp_feats[senders] + inp_feats[receivers], receivers, rel_pos, self.radius, a=a_ff)
+            ans_conv_ascc = conv_ascc(inp_feats[senders] + inp_feats[receivers], receivers, rel_pos, a=a_ff)
             ans_dense_ascc = dense_ascc(inp_feats)
             ans_dense_ascc = jnp.where(fluid_mask, ans_dense_ascc, 0.0)
 
             ans_ascc = ans_conv_ascc + ans_dense_ascc
             
             #aff
-            ans_select = aff(ans_cconv, ans_ascc, senders, receivers, rel_pos, self.radius, a=a_ff, isTraining=isTraining)
+            ans_select = aff(ans_cconv, ans_ascc, senders, receivers, rel_pos, a=a_ff, isTraining=isTraining)
 
             #ResAFF
             if len(ans_convs) == 3 and ans_dense_cconv.shape[-1] == ans_convs[-2].shape[-1]:
-                ans_select = self.resAff(ans_select, ans_convs[-2], senders, receivers, rel_pos, self.radius, a=a_ff, isTraining=isTraining)
+                ans_select = self.resAff(ans_select, ans_convs[-2], senders, receivers, rel_pos, a=a_ff, isTraining=isTraining)
 
             ans_convs.append(ans_select)
         #jax.debug.print("corrections mean magnitude {}", jnp.sum(jnp.linalg.norm(ans_convs[-1], ord=2, axis=1)) / jnp.sum(fluid_mask[:, 0]))
