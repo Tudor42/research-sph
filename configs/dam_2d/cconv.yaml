@@ -3,7 +3,7 @@ extends: configs/dam_2d/base.yaml
 model: 
   name: cconv
   input_seq_length: 3
-  vel_div_loss: True
+  vel_div_loss: False
   positions_after_forces: True
   mask_self: True
 train:

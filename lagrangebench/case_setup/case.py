@@ -225,7 +225,7 @@ def case_builder(
             # most_recent_position = jnp.where((particle_type == Tag.FLUID)[:, None], most_recent_position, pos_input[:, input_seq_length - 1, :]) # for wall particles use previous position to compute displacement 
 
             displacement = displacement_fn_vmap(
-                most_recent_position[senders], most_recent_position[receivers]
+                most_recent_position[receivers], most_recent_position[senders]
             )
             normalized_relative_displacements = displacement / metadata["default_connectivity_radius"]
             features["rel_disp"] = normalized_relative_displacements
