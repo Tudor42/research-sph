@@ -212,11 +212,11 @@ def case_builder(
             # selected features
             features = feature_transform(pos_input[:, :input_seq_length], neighbors, frame_times[:input_seq_length])
         else:
-            velocity_stats = normalization_stats["velocity"]
-
+            # velocity_stats = normalization_stats["velocity"]
+            
             features = {}
             features["abs_pos"] = most_recent_position[:, None]
-            features["vel2_candidates"] = jnp.where((particle_type == Tag.FLUID)[:, None], vel2_candidate, displacement_fn_vmap(most_recent_position, pos_input[:, input_seq_length - 1]))        
+            features["vel2_candidates"] = jnp.where((particle_type == Tag.FLUID)[:, None], vel2_candidate, displacement_fn_vmap(most_recent_position, pos_input[:, input_seq_length - 1]) / dt_coarse)        
             # features["vel2_candidates"] = (jnp.where((particle_type == Tag.FLUID)[:, None], vel2_candidate, displacement_fn_vmap(most_recent_position, pos_input[:, input_seq_length - 1])) - velocity_stats["mean"]) / velocity_stats["std"]
 
             receivers, senders = neighbors.idx

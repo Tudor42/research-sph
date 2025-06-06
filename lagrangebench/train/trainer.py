@@ -32,24 +32,22 @@ from lagrangebench.utils import (
 from .strats import push_forward_build, push_forward_sample_steps
 from ..utils_extra.continous_convolution import window_poly6
 
-@partial(jax.jit, static_argnames=["mass"])
-def compute_divergence_loss(new_pos, vels, senders, receivers, case, non_kinematic_mask, mass):    
-    disp  = jax.vmap(case.displacement, in_axes=(0,0))(new_pos[receivers], new_pos[senders]) 
+@partial(jax.jit)
+def compute_divergence_loss(vels, senders, receivers, case, non_kinematic_mask, disp, distances):    
     vel_diff = vels[senders] - vels[receivers]
     mask_out_self_edges = (senders != receivers)
 
     rad_vel = jnp.einsum('ed,ed->e', vel_diff, disp)            # (E_max,)
-    r2      = jnp.sqrt(jnp.einsum('ed,ed->e', disp, disp))    # (E_max,)
         
     grad_w     = jnp.where(
-                (r2>0.0)&(r2<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
-                jax.vmap(case.kernel.grad_w)(r2),
+                (distances>0.0)&(distances<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
+                jax.vmap(case.kernel.grad_w)(distances),
                 0.0
              )
     grad_w  = jax.lax.stop_gradient(grad_w)
     
-    w = jnp.where((r2>0.0)&(r2<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
-                  case.kernel.w(r2),
+    w = jnp.where((distances>0.0)&(distances<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
+                  case.kernel.w(distances),
                   0.0
                  )
     w = jax.lax.stop_gradient(w)
@@ -64,23 +62,17 @@ def compute_divergence_loss(new_pos, vels, senders, receivers, case, non_kinemat
                        0.0)
     
     rad_vel_dens = jnp.einsum('e,e->e', inv_dens, rad_vel)
-    rad_vel_dens = jnp.where((r2>0.0) & (r2<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
-                             rad_vel_dens / r2,
+    rad_vel_dens = jnp.where((distances>0.0) & (distances<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
+                             rad_vel_dens / distances,
                              0.0)                            
     
     div_approx = jax.ops.segment_sum(grad_w * rad_vel_dens, receivers, num_segments=case.metadata["num_particles_max"]) # / jnp.sum(densities) # (N,)
     div_approx = jnp.where(non_kinematic_mask, div_approx, 0.0)
 
-    neighbor = jnp.where((r2 > 0.0) & (r2 < case.metadata["default_connectivity_radius"]) & non_kinematic_mask[receivers], 1.0, 0.0)
 
-    neighbors_count = jax.ops.segment_sum(neighbor, receivers, num_segments=case.metadata["num_particles_max"])
-    neighbors_count = jnp.where(non_kinematic_mask, neighbors_count, 0)
-    weights = neighbors_count / jnp.sum(neighbors_count)
-    weighted_div_approx =  weights * div_approx
-    
     min_dist = case.metadata["dx"]
     
-    return jnp.sum(weighted_div_approx ** 2), min_dist * jnp.sum(jnp.where(mask_out_self_edges & non_kinematic_mask[receivers], jnp.clip((min_dist - r2) / min_dist, 0.0, 1.0), 0.0))
+    return div_approx ** 2, min_dist * jnp.sum(jnp.where(mask_out_self_edges & non_kinematic_mask[receivers], jnp.clip((min_dist - distances) / min_dist, 0.0, 1.0), 0.0))
     # return jnp.sum(div_approx ** 2), jnp.sum((weights * dens_deviation)**2)
     
     
@@ -101,15 +93,26 @@ def _mse(
     pred, state = model_fn(params["model"], state, (features, particle_type), isTraining=True)
     # check active (non zero) output shapes
     assert all(target[k].shape == pred[k].shape for k in pred)
-
+    senders, receivers = features["senders"], features["receivers"]
+    new_pos   = case.integrate(pred, features["abs_pos"][:, -1:])
+    
     # particle mask
     non_kinematic_mask = jnp.logical_not(get_kinematic_mask(particle_type))
     num_non_kinematic = non_kinematic_mask.sum()
+    
+    disp  = jax.vmap(case.displacement, in_axes=(0,0))(new_pos[receivers], new_pos[senders]) 
+    distances      = jnp.sqrt(jnp.einsum('ed,ed->e', disp, disp))    # (E_max,)
+    neighbor = jnp.where((distances > 0.0) & (distances < case.metadata["default_connectivity_radius"]) & non_kinematic_mask[receivers], 1.0, 0.0)
+    C = 1.0 / 40.0
+    neighbors_count = jax.ops.segment_sum(neighbor, receivers, num_segments=case.metadata["num_particles_max"])
+    importance = jnp.exp(-C * jnp.where(non_kinematic_mask, neighbors_count, 0))
+    # weights = neighbors_count / jnp.sum(neighbors_count)
+
     # loss components
     losses = []
     for t in pred:
         w = getattr(loss_weight, t)
-        losses.append((w * (pred[t] - target[t]) ** 2).sum(axis=-1))
+        losses.append((w * importance * (pred[t] - target[t]) ** 2).sum(axis=-1))
     total_loss = jnp.array(losses).sum(0)
     total_loss = jnp.where(non_kinematic_mask, total_loss, 0)
     total_loss = total_loss.sum() / num_non_kinematic
@@ -117,18 +120,18 @@ def _mse(
     div_loss = 0.0
     proximity_loss = 0.0
     data_loss = total_loss
+
     if vel_div_loss:
         dt        = case.metadata["write_every"] * case.metadata["dt"]
-        new_pos   = case.integrate(pred, features["abs_pos"][:, -2:])
         vels_pred = (new_pos - features["abs_pos"][:, -1]) / dt  # (N,D)
         # velocity_stats = case.normalization_stats["velocity"]
         # normalized_velocity_pred = (
         #     vels_pred - velocity_stats["mean"]
         # ) / velocity_stats["std"]
 
-        div_loss, proximity_loss = compute_divergence_loss(new_pos, vels_pred, features["senders"], features["receivers"], case, non_kinematic_mask, case.metadata["dx"] ** case.metadata["dim"])
+        div_loss, proximity_loss = compute_divergence_loss(vels_pred, features["senders"], features["receivers"], case, non_kinematic_mask, disp, distances)
 
-        div_loss = div_loss # / num_non_kinematic
+        div_loss = jnp.sum(1 / importance * div_loss) / num_non_kinematic
         proximity_loss = proximity_loss / num_non_kinematic
         # jax.debug.print("div_loss={}", div_loss)
         precision = params["meta"]["raw_logs"]
