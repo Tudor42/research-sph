@@ -289,4 +289,4 @@ class MyParticleNetwork(BaseModel):
         #     init=hk.initializers.Constant(1/109.37)
         # )
         #jax.debug.print("s={}", s)
-        return {"pos": pos2 + 1/110*ans_convs[-1]}
+        return {"pos": pos2 + 1/110 * ans_convs[-1]}

@@ -112,7 +112,7 @@ def _mse(
     losses = []
     for t in pred:
         w = getattr(loss_weight, t)
-        losses.append((w * importance * (pred[t] - target[t]) ** 2).sum(axis=-1))
+        losses.append((w * importance[:, None] * (pred[t] - target[t]) ** 2).sum(axis=-1))
     total_loss = jnp.array(losses).sum(0)
     total_loss = jnp.where(non_kinematic_mask, total_loss, 0)
     total_loss = total_loss.sum() / num_non_kinematic

@@ -320,5 +320,5 @@ def case_builder(
         shift_fn,
         normalization_stats,
         metadata,
-        QuinticKernel(h=metadata["dx"], dim=metadata["dim"])
+        QuinticKernel(h=metadata["default_connectivity_radius"] / 3.0, dim=metadata["dim"])
     )
