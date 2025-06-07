@@ -31,21 +31,25 @@ from lagrangebench.utils import (
 
 from .strats import push_forward_build, push_forward_sample_steps
 from ..utils_extra.continous_convolution import window_poly6
+from jax_sph.solver import EPS
+
 
 @partial(jax.jit)
 def compute_divergence_loss(vels, senders, receivers, case, non_kinematic_mask, disp, distances):    
     vel_diff = vels[senders] - vels[receivers]
     mask_out_self_edges = (senders != receivers)
 
-    rad_vel = jnp.einsum('ed,ed->e', vel_diff, disp)            # (E_max,)
         
-    grad_w     = jnp.where(
+    grad_w_dist_norm     = jnp.where(
                 (distances>0.0)&(distances<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
                 jax.vmap(case.kernel.grad_w)(distances),
                 0.0
              )
-    grad_w  = jax.lax.stop_gradient(grad_w)
+    e_s = jnp.where(mask_out_self_edges[:, None], disp / (distances[:, None] +EPS), 0.0)
+    grad_w_dist = grad_w_dist_norm[:, None] * e_s
+    grad_w_dist  = jax.lax.stop_gradient(grad_w_dist)
     
+
     w = jnp.where((distances>0.0)&(distances<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
                   case.kernel.w(distances),
                   0.0
@@ -57,16 +61,17 @@ def compute_divergence_loss(vels, senders, receivers, case, non_kinematic_mask, 
     
     dens_edge = densities[senders]
 
-    inv_dens   = jnp.where(dens_edge > 0.0,
+    inv_dens   = jnp.where((dens_edge > 0.0) & mask_out_self_edges,
                        1 / dens_edge,
                        0.0)
     
+    rad_vel = jnp.einsum('ed,ed->e', vel_diff, grad_w_dist)            # (E_max,)
     rad_vel_dens = jnp.einsum('e,e->e', inv_dens, rad_vel)
     rad_vel_dens = jnp.where((distances>0.0) & (distances<case.metadata["default_connectivity_radius"]) & mask_out_self_edges,
-                             rad_vel_dens / distances,
-                             0.0)                            
+                             rad_vel_dens,
+                             0.0)
     
-    div_approx = jax.ops.segment_sum(grad_w * rad_vel_dens, receivers, num_segments=case.metadata["num_particles_max"]) # / jnp.sum(densities) # (N,)
+    div_approx = jax.ops.segment_sum(rad_vel_dens, receivers, num_segments=case.metadata["num_particles_max"]) # / jnp.sum(densities) # (N,)
     div_approx = jnp.where(non_kinematic_mask, div_approx, 0.0)
 
 
@@ -130,8 +135,9 @@ def _mse(
         # ) / velocity_stats["std"]
 
         div_loss, proximity_loss = compute_divergence_loss(vels_pred, features["senders"], features["receivers"], case, non_kinematic_mask, disp, distances)
-
-        div_loss = jnp.sum(1 / importance * div_loss) / num_non_kinematic
+        importance = jnp.exp(C * jnp.where(non_kinematic_mask, neighbors_count, 0))
+        
+        div_loss = jnp.sum(importance * div_loss) / (num_non_kinematic * jnp.sum(importance))
         proximity_loss = proximity_loss / num_non_kinematic
         # jax.debug.print("div_loss={}", div_loss)
         precision = params["meta"]["raw_logs"]
