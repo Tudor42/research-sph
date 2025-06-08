@@ -1,0 +1,9 @@
+from abc import ABC, abstractmethod
+
+class EventHandler(ABC):
+    @abstractmethod
+    def handle_press(self, key, x, y): ...
+    @abstractmethod
+    def handle_release(self, key): ...
+    @abstractmethod
+    def handle_motion(self, x, y): ...

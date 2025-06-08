@@ -1,6 +1,5 @@
 .*
 *__pycache__*
-cases/
 ckp/
 datasets/
 jax_setup/
