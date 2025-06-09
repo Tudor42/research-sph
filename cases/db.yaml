@@ -23,6 +23,6 @@ solver:
   dt: 0.0003
 
 io:
-  write_type: ["vtk"]
+  write_type: ["h5"]
   write_every: 100
   data_path: "data/debug"

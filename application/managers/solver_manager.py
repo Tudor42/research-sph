@@ -1,9 +1,9 @@
+from functools import partial
 import jax
 import jax.numpy as jnp
 import jmp
 import numpy as np
 from omegaconf import OmegaConf
-from application.managers.case_manager import CaseManager
 from jax_sph import partition
 from jax_sph.integrator import si_euler
 from jax_sph.jax_md import space
@@ -59,7 +59,7 @@ class SolverManager:
 
         self.neighbors0 = self.neighbors
 
-    def next(self, case_manager: CaseManager, step, state):
+    def next(self, case_manager, step, state):
         if not self.is_solver_initialized:
             self.init_solver(case_manager)
             self.is_solver_initialized = True
@@ -82,17 +82,42 @@ class SolverManager:
         elif self.curr_solver_name == "cconv":
             return self.advance_nn_model(case_manager, step, state)
 
-    def advance_nn_model(self, case_manager: CaseManager, step, state):
-        dt = case_manager.cfg.solver.dt
+
+    def advance_nn_model(self, case_manager, step, state):
+        dt = case_manager.cfg.solver.dt * 100
         if self.seq.shape[1] > step:
             state["r"] = self.seq[:, step]
             return state
-        tvf = case_manager.cfg.solver.tvf
-        forces = case_manager.g_ext_fn(self.seq[:, -1], case_manager.cfg.solver.dt * step)
+        features, neighbors_ = self.create_features(self.seq, state, self.neighbors, case_manager, step)
         non_kinematic_mask = jnp.logical_not(get_kinematic_mask(state["tag"]))[:, None]
 
-        most_recent_positions = self.seq[:, -1]
-        vel1 = self.displacement_fn_vmap(self.seq[:, -1], self.seq[:, -2]) / dt
+        if neighbors_.did_buffer_overflow:
+            edges_ = self.neighbors.idx.shape
+            print(f"Reallocate neighbors list {edges_} at step {step}")
+            self.neighbors = self.neighbor_fn.allocate(features["abs_pos"][:, 0], num_particles=self.num_particles)
+            print(f"To list {self.neighbors.idx.shape}")
+            features,  self.neighbors = self.create_features(self.seq, state, self.neighbors, case_manager, step)
+        else:
+            self.neighbors = neighbors_
+        pred, self.model_state = self.model_apply(self.model_params, self.model_state, (features, state["tag"]))
+
+        state["u"] = jnp.where(non_kinematic_mask, self.displacement_fn_vmap(pred["pos"], state["r"]) / dt, state["u"])
+        state["r"] = jnp.where(non_kinematic_mask, pred["pos"], state["r"])
+        
+        tail = self.seq[:, 1:, :]
+        self.seq = jnp.concatenate([tail, state["r"][:, None, :]], axis=1)
+
+        return state
+
+    @partial(jax.jit, static_argnums=(0, 4))
+    def create_features(self, position_seq, state, neighbors, case_manager, step):
+        dt = case_manager.cfg.solver.dt * 100
+        tvf = case_manager.cfg.solver.tvf
+        forces = case_manager.g_ext_fn(position_seq[:, -1], case_manager.cfg.solver.dt * step)
+        non_kinematic_mask = jnp.logical_not(get_kinematic_mask(state["tag"]))[:, None]
+
+        most_recent_positions = position_seq[:, -1]
+        vel1 = self.displacement_fn_vmap(position_seq[:, -1], position_seq[:, -2]) / dt
 
         vel2_candidate = vel1 + case_manager.cfg.solver.dt * forces
         pos2_candidate = case_manager.shift_fn(most_recent_positions, case_manager.cfg.solver.dt * (vel2_candidate + vel1) / 2.0)
@@ -105,20 +130,14 @@ class SolverManager:
         
         most_recent_position = jnp.where(non_kinematic_mask, pos2_candidate, wall_pos)
 
-        neighbors_ = self.neighbors.update(
+        neighbors = neighbors.update(
             most_recent_position, num_particles=self.num_particles
         )
-        if neighbors_.did_buffer_overflow:
-            edges_ = self.neighbors.idx.shape
-            print(f"Reallocate neighbors list {edges_} at step {step}")
-            self.neighbors = self.neighbor_fn.allocate(state["r"], num_particles=self.num_particles)
-            print(f"To list {self.neighbors.idx.shape}")
-        else:
-            self.neighbors = neighbors_
+       
         features = {}
         features["abs_pos"] = most_recent_position[:, None]
         features["vel2_candidates"] = jnp.where(non_kinematic_mask, vel2_candidate, self.displacement_fn_vmap(most_recent_position, self.seq[:, -1]) / dt)        
-        receivers, senders = self.neighbors.idx
+        receivers, senders = neighbors.idx
         features["senders"] = senders
         features["receivers"] = receivers
         displacement = self.displacement_fn_vmap(
@@ -131,21 +150,11 @@ class SolverManager:
         )
         features["rel_dist"] = normalized_relative_distances[:, None]
         displacement = self.displacement_fn_vmap(
-                self.seq[senders, -1], self.seq[receivers, -1]
+                position_seq[senders, -1], position_seq[receivers, -1]
         )
         normalized_relative_displacements = displacement / (1.45 * case_manager.cfg.case.dx)
         features["rel_disp_from_prev_time"] = normalized_relative_displacements
-
-        pred, self.model_state = self.model_apply(self.model_params, self.model_state, (features, state["tag"]))
-
-        state["u"] = jnp.where(non_kinematic_mask, self.displacement_fn_vmap(pred["pos"], state["r"]) / dt, state["u"])
-        state["r"] = jnp.where(non_kinematic_mask, pred["pos"], state["r"])
-        
-        tail = self.seq[:, 1:, :]
-        self.seq = jnp.concatenate([tail, state["r"][:, None, :]], axis=1)
-
-        return state
-
+        return features, neighbors
 
 def get_model_cfg(ckp_directory):
     config_path = os.path.join(ckp_directory, "config.yaml")
