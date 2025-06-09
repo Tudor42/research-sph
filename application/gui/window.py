@@ -2,7 +2,8 @@ import taichi as ti
 import numpy as np
 
 from application.case_utils.case_manager import CaseManager
-from application.solver_manager import SolverManager
+from application.case_utils.solver_manager import SolverManager
+from application.utils.tkinter_component import open_case_file
 from .camera import Camera2D
 
 class Window:
@@ -69,6 +70,12 @@ class Window:
                 self.mode = 'builder'
             elif e.key == "l" and self.mode == "normal" and not self.run_sim:
                 self.mode = 'select case'
+            elif e.key == "m" and self.mode == "normal" and not self.run_sim:
+                self.mode = 'select model'
+            elif e.key == "c" and self.mode == "select model":
+                self.solver_manager.select("cconv")
+                self.solver_manager.init_solver()
+                self.mode = "normal"
             elif e.key == 'd' and self.mode == 'select case':
                 self.case_manager.select("db")
                 self.solver_manager.init_solver()
@@ -83,6 +90,8 @@ class Window:
                 self.run_sim = not self.run_sim
             elif e.key == 'r' and (self.mode == "normal"):
                 self.case_manager.reset()
+            elif e.key == 'o' and self.mode == "normal":
+                print(open_case_file())
         
         h = self.handlers.get(self.mode)
         if h is None:
