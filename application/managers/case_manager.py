@@ -34,29 +34,3 @@ class CaseManager:
             self.displacement_fn,
             self.shift_fn,
         ) = self._current.initialize()
-        self.step = 0.0
-        self.state0 = self.state
-
-    def update(self, gui):
-        if self._current is None:
-            return
-        tags = self.state['tag']
-        positions = self.state['r']
-        # Filter out padding values
-        valid = tags != Tag.PAD_VALUE
-        tags = tags[valid]
-        pts  = positions[valid]
-        # split masks
-        fluid_mask = tags == Tag.FLUID
-        per_vertex_color = jnp.where(fluid_mask[:, None], jnp.array((0.2, 0.5, 0.9)), jnp.array((0.7, 0.7, 0.7)))
-
-        gui.draw_circles(
-            pts,
-            radius=gui.radius,
-            size=pts.shape[0],
-            per_vertex_color=per_vertex_color,
-        )
-
-    def reset(self):
-        self.step = 0.0
-        self.state = self.state0
