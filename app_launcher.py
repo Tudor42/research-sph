@@ -1,4 +1,6 @@
+import argparse
 from jax import config
+from application.client.remote_state_manager import RemoteStateManager
 from application.gui.window import Window
 import numpy as np
 import jax.numpy as jnp
@@ -27,9 +29,19 @@ def update(window: Window):
     )
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--remote", type=bool, default=True)
+    parser.add_argument("--host", type=str, default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=50007)
+    parser.add_argument("--password", type=str, required=True, help="Password clients must provide in init")
+
+    args = parser.parse_args()
+
     config.update("jax_enable_x64", True)
  
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'        # pick GPU #0
     jax.config.update('jax_platform_name', 'gpu')   # force GPU
-    gui = Window(arch=ti.cuda)
+
+    sm  = RemoteStateManager(args.host, args.port, args.password)
+    gui = Window(arch=ti.cuda, state_manager=sm)
     gui.run(update_fn=update)

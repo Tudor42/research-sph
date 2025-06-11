@@ -2,7 +2,7 @@ import taichi as ti
 import numpy as np
 
 
-from application.managers.state_manager import StateManager
+from application.server.managers.state_manager import StateManager
 from application.utils.tkinter_component import open_case_file
 from .camera import Camera2D
 
@@ -12,9 +12,10 @@ class Window:
                  title="SPH Simulator",
                  background_color=(0.0, 0.0, 0.0),
                  fps_limit=60,
-                 arch=ti.cpu):
+                 arch=ti.cpu, 
+                 state_manager=None):
         ti.init(arch=arch)
-        self.state_manager = StateManager()
+        self.state_manager = state_manager or StateManager()
 
         self.gui = ti.ui.Window(title,
                                 res=resolution,
@@ -59,8 +60,6 @@ class Window:
         for e in event_list:
             if e.key == "n":
                 self.mode = 'normal'
-            elif e.key == "b" and self.mode == "normal" and not self.run_sim:
-                self.mode = 'builder'
             elif e.key == "l" and self.mode == "normal" and not self.run_sim:
                 self.mode = 'select case'
             elif e.key == "m" and self.mode == "normal" and not self.run_sim:
@@ -68,14 +67,21 @@ class Window:
             elif e.key == "c" and self.mode == "select model":
                 self.state_manager.select_solver("cconv")
                 self.mode = "normal"
+            elif e.key == "g" and self.mode == "select model":
+                self.state_manager.select_solver("gns")
+                self.mode = "normal"
+            elif e.key == "w" and self.mode == "select model":
+                self.state_manager.select_solver("wcsph")
+                self.mode = "normal"
             elif e.key == 'd' and self.mode == 'select case':
                 self.state_manager.select_case("db")
                 self.mode = 'normal'
-                return
             elif e.key == 'f' and self.mode == 'select case':
                 self.state_manager.select_case("ft2d")
                 self.mode = 'normal'
-                return
+            elif e.key == 'e' and self.mode == 'select case':
+                self.state_manager.select_case("empty")
+                self.mode = 'normal'
             elif e.key == ti.ui.SPACE and (self.mode == "normal"):
                 self.run_sim = not self.run_sim
             elif e.key == 'r' and (self.mode == "normal"):

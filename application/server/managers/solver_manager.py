@@ -56,7 +56,16 @@ class SolverManager:
             self.seq0 = jnp.stack(seq, axis=1)
             self.select("cconv")
             self.model_apply, self.model_params, self.model_state, self.neighbor_fn, self.neighbors, self.input_seq_length, self.num_particles = create_cconv(case_manager, self.model_cfg)
-
+        elif self.curr_solver_name == "gns":
+            self.input_seq_length = self.model_cfg.model.input_seq_length
+            self.select("wcsph")
+            self.init_solver(case_manager)
+            state = case_manager.state
+            seq = [state['r']]
+            for step in range(self.input_seq_length - 1):
+                state = self.next(case_manager, step, state)
+                seq.append(state['r'])
+            self.seq0 = jnp.stack(seq, axis=1)
         self.neighbors0 = self.neighbors
 
     def next(self, case_manager, step, state):
@@ -84,11 +93,11 @@ class SolverManager:
 
 
     def advance_nn_model(self, case_manager, step, state):
-        dt = case_manager.cfg.solver.dt * 100
+        dt = case_manager.cfg.solver.dt * 500
         if self.seq.shape[1] > step:
             state["r"] = self.seq[:, step]
             return state
-        features, neighbors_ = self.create_features(self.seq, state, self.neighbors, case_manager, step)
+        features, neighbors_ = self.create_features(self.seq, state, self.neighbors, case_manager.g_ext_fn, case_manager.bc_fn, case_manager.shift_fn, case_manager.cfg, step)
         non_kinematic_mask = jnp.logical_not(get_kinematic_mask(state["tag"]))[:, None]
 
         if neighbors_.did_buffer_overflow:
@@ -96,7 +105,7 @@ class SolverManager:
             print(f"Reallocate neighbors list {edges_} at step {step}")
             self.neighbors = self.neighbor_fn.allocate(features["abs_pos"][:, 0], num_particles=self.num_particles)
             print(f"To list {self.neighbors.idx.shape}")
-            features,  self.neighbors = self.create_features(self.seq, state, self.neighbors, case_manager, step)
+            features,  self.neighbors = self.create_features(self.seq, state, self.neighbors, case_manager.g_ext_fn, case_manager.bc_fn, case_manager.shift_fn, case_manager.cfg, step)
         else:
             self.neighbors = neighbors_
         pred, self.model_state = self.model_apply(self.model_params, self.model_state, (features, state["tag"]))
@@ -109,24 +118,24 @@ class SolverManager:
 
         return state
 
-    @partial(jax.jit, static_argnums=(0, 4))
-    def create_features(self, position_seq, state, neighbors, case_manager, step):
-        dt = case_manager.cfg.solver.dt * 100
-        tvf = case_manager.cfg.solver.tvf
-        forces = case_manager.g_ext_fn(position_seq[:, -1], case_manager.cfg.solver.dt * step)
+    @partial(jax.jit, static_argnums=(0, 4, 5, 6, 7))
+    def create_features(self, position_seq, state, neighbors, g_ext_fn, bc_fn, shift_fn, cfg, step):
+        dt = cfg.solver.dt * 100
+        tvf = cfg.solver.tvf
+        forces = g_ext_fn(position_seq[:, -1], cfg.solver.dt * step)
         non_kinematic_mask = jnp.logical_not(get_kinematic_mask(state["tag"]))[:, None]
 
         most_recent_positions = position_seq[:, -1]
         vel1 = self.displacement_fn_vmap(position_seq[:, -1], position_seq[:, -2]) / dt
 
-        vel2_candidate = vel1 + case_manager.cfg.solver.dt * forces
-        pos2_candidate = case_manager.shift_fn(most_recent_positions, case_manager.cfg.solver.dt * (vel2_candidate + vel1) / 2.0)
+        vel2_candidate = vel1 + cfg.solver.dt * forces
+        pos2_candidate = shift_fn(most_recent_positions, cfg.solver.dt * (vel2_candidate + vel1) / 2.0)
         
-        state = case_manager.bc_fn(state, case_manager.cfg.solver.dt * step)
+        state = bc_fn(state, cfg.solver.dt * step)
         state["u"] += 1.0 * dt * state["dudt"]
         state["v"] = state["u"] + tvf * 0.5 * dt * state["dvdt"]
 
-        wall_pos = case_manager.shift_fn(state["r"], 1.0 * dt * state["v"])
+        wall_pos = shift_fn(state["r"], 1.0 * dt * state["v"])
         
         most_recent_position = jnp.where(non_kinematic_mask, pos2_candidate, wall_pos)
 
@@ -143,7 +152,7 @@ class SolverManager:
         displacement = self.displacement_fn_vmap(
             most_recent_position[receivers], most_recent_position[senders]
         )
-        normalized_relative_displacements = displacement / (1.45 * case_manager.cfg.case.dx)
+        normalized_relative_displacements = displacement / (1.45 * cfg.case.dx)
         features["rel_disp"] = normalized_relative_displacements
         normalized_relative_distances = space.distance(
             normalized_relative_displacements
@@ -152,7 +161,7 @@ class SolverManager:
         displacement = self.displacement_fn_vmap(
                 position_seq[senders, -1], position_seq[receivers, -1]
         )
-        normalized_relative_displacements = displacement / (1.45 * case_manager.cfg.case.dx)
+        normalized_relative_displacements = displacement / (1.45 * cfg.case.dx)
         features["rel_disp_from_prev_time"] = normalized_relative_displacements
         return features, neighbors
 

@@ -1,5 +1,5 @@
-from application.managers.case_manager import CaseManager
-from application.managers.solver_manager import SolverManager
+from application.server.managers.case_manager import CaseManager
+from application.server.managers.solver_manager import SolverManager
 
 class StateManager:
     def __init__(self):

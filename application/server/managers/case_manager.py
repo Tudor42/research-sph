@@ -1,13 +1,10 @@
-import jax
 from omegaconf import OmegaConf
-from application.managers.solver_manager import create_wcsph
-from jax_sph.defaults import defaults
+from application.server.managers.solver_manager import create_wcsph
 from jax_sph.case_setup import load_case, set_relaxation
 import os
 import copy
 
 from jax_sph.io_state import io_setup, write_state
-from jax_sph.utils import Tag
 from main_jax_sph import load_embedded_configs
 
 class CaseManager:
