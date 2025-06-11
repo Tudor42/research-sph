@@ -48,11 +48,12 @@ class SolverManager:
             self.input_seq_length = self.model_cfg.model.input_seq_length
             self.select("wcsph")
             self.init_solver(case_manager)
-            state = case_manager.state
+            state = jax.tree_util.tree_map(lambda x: jnp.array(x), case_manager.state)
             seq = [state['r']]
-            for step in range(self.input_seq_length - 1):
+            for step in range(1, 100 * (self.input_seq_length - 1) + 1):
                 state = self.next(case_manager, step, state)
-                seq.append(state['r'])
+                if step % 100 == 0: 
+                    seq.append(state['r'])
             self.seq0 = jnp.stack(seq, axis=1)
             self.select("cconv")
             self.model_apply, self.model_params, self.model_state, self.neighbor_fn, self.neighbors, self.input_seq_length, self.num_particles = create_cconv(case_manager, self.model_cfg)
@@ -93,7 +94,7 @@ class SolverManager:
 
 
     def advance_nn_model(self, case_manager, step, state):
-        dt = case_manager.cfg.solver.dt * 500
+        dt = case_manager.cfg.solver.dt * 100
         if self.seq.shape[1] > step:
             state["r"] = self.seq[:, step]
             return state
@@ -128,10 +129,10 @@ class SolverManager:
         most_recent_positions = position_seq[:, -1]
         vel1 = self.displacement_fn_vmap(position_seq[:, -1], position_seq[:, -2]) / dt
 
-        vel2_candidate = vel1 + cfg.solver.dt * forces
-        pos2_candidate = shift_fn(most_recent_positions, cfg.solver.dt * (vel2_candidate + vel1) / 2.0)
+        vel2_candidate = vel1 + dt * forces
+        pos2_candidate = shift_fn(most_recent_positions, dt * (vel2_candidate + vel1) / 2.0)
         
-        state = bc_fn(state, cfg.solver.dt * step)
+        state = bc_fn(state, dt * step)
         state["u"] += 1.0 * dt * state["dudt"]
         state["v"] = state["u"] + tvf * 0.5 * dt * state["dvdt"]
 
@@ -177,8 +178,12 @@ def get_model_cfg(ckp_directory):
     return load_embedded_configs(config_path, cli_args)
 
 def create_cconv(case_manager, cfg):
-    num_particles = (case_manager.state["tag"] != Tag.PAD_VALUE).sum()
-    # self.generate_input_seq(cfg.model.input_seq_length)
+    count_array = (case_manager.state["tag"] != Tag.PAD_VALUE).sum()
+
+    if hasattr(count_array, "block_until_ready"):
+        count_array = count_array.block_until_ready()
+
+    num_particles = int(count_array.item())
 
     load_ckp = cfg.load_ckp
     default_connectivity_radius = 1.45 * case_manager.cfg.case.dx

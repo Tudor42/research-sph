@@ -2,8 +2,6 @@
 
 from typing import Callable, Dict
 
-import jax
-
 from jax_sph.utils import Tag
 
 

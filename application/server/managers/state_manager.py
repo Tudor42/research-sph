@@ -1,5 +1,7 @@
 from application.server.managers.case_manager import CaseManager
 from application.server.managers.solver_manager import SolverManager
+import jax
+import jax.numpy as jnp
 
 class StateManager:
     def __init__(self):
@@ -38,7 +40,7 @@ class StateManager:
 
     def reset_scene(self):
         self.step = 0
-        self.state = self.case_manager.state
+        self.state = jax.tree_util.tree_map(lambda x: jnp.array(x), self.case_manager.state)
 
     def advance(self):
         self.state = self.solver_manager.next(self.case_manager, self.step, self.state)

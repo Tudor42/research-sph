@@ -67,7 +67,16 @@ def handle_client(sm, conn: socket.socket, addr, password):
             except socket.timeout:
                 print(f"Timeout waiting for init from {addr}")
                 break
-            result = _process_command(sm, cmd)
+            try:
+                result = _process_command(sm, cmd)
+            except Exception as e:
+                err_msg = str(e)
+                print(f"Error processing command from {addr}: {err_msg}")
+                try:
+                    send_msg(conn, {"error": err_msg})
+                except Exception:
+                    pass
+                break
             if result is not None:
                 send_msg(conn, result)
     except socket.timeout:
