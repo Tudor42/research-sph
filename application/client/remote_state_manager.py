@@ -12,9 +12,16 @@ class RemoteStateManager:
         self.step = 0
         send_msg(self.sock, {"cmd": "init", "password": password})
         self._state = recv_msg(self.sock)
+
         if "error" in self._state:
             print("Error while connecting", self._state["error"])
             sys.exit(0)
+
+        send_msg(self.sock, {'cmd': 'cases'})
+        self.cases = recv_msg(self.sock)["cases"]
+        send_msg(self.sock, {'cmd': 'solvers'})
+        self.solvers = recv_msg(self.sock)["solvers"]
+
         if self._state is not None:
             self.dt = float(self._state.get("dt", 0.0))
 
@@ -46,12 +53,10 @@ class RemoteStateManager:
         return np.array(self._state['positions'])
 
     def cases_names(self):
-        self._update_state({'cmd': 'cases'})
-        return self._state['cases']
+        return self.cases
 
     def solvers_names(self):
-        self._update_state({'cmd': 'solvers'})
-        return self._state['solvers']
+        return self.solvers
 
     def select_case(self, case_name):
         self._update_state({'cmd': 'select_case', 'case': case_name})

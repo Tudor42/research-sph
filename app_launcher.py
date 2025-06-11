@@ -2,7 +2,6 @@ import argparse
 from jax import config
 from application.client.remote_state_manager import RemoteStateManager
 from application.gui.window import Window
-import numpy as np
 import jax.numpy as jnp
 import taichi as ti
 import os
