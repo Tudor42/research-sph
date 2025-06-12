@@ -49,8 +49,8 @@ class SolverManager:
             self.select("wcsph")
             self.init_solver(case_manager)
             state = jax.tree_util.tree_map(lambda x: jnp.array(x), case_manager.state)
-            seq = [state['r']]
-            for step in range(1, 100 * (self.input_seq_length - 1) + 1):
+            seq = []
+            for step in range(1, 100 * (self.input_seq_length) + 1):
                 state = self.next(case_manager, step, state)
                 if step % 100 == 0: 
                     seq.append(state['r'])
