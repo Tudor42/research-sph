@@ -11,19 +11,23 @@ class RemoteStateManager:
         self.dt = 0.0
         self.step = 0
         send_msg(self.sock, {"cmd": "init", "password": password})
-        self._state = recv_msg(self.sock)
+        self.state = recv_msg(self.sock)
 
-        if "error" in self._state:
-            print("Error while connecting", self._state["error"])
-            sys.exit(0)
+        if "error" in self.state:
+            print("Error while connecting", self.state["error"])
+            return
 
         send_msg(self.sock, {'cmd': 'cases'})
-        self.cases = recv_msg(self.sock)["cases"]
+        msg = recv_msg(self.sock)
+        self.cases = msg["cases"]
+        self.selected_case = msg["selected_case"]
         send_msg(self.sock, {'cmd': 'solvers'})
-        self.solvers = recv_msg(self.sock)["solvers"]
+        msg = recv_msg(self.sock)
+        self.cases = msg["solvers"]
+        self.selected_solver = msg["selected_solver"]
 
-        if self._state is not None:
-            self.dt = float(self._state.get("dt", 0.0))
+        if self.state is not None:
+            self.dt = float(self.state.get("dt", 0.0))
 
     def close(self):
         if self.sock:
@@ -42,15 +46,15 @@ class RemoteStateManager:
 
     def _update_state(self, cmd):
         send_msg(self.sock, cmd)
-        self._state = recv_msg(self.sock)
-        if self._state is not None and "dt" in self._state:
-            self.dt = float(self._state.get("dt", 0.0))
+        self.state = recv_msg(self.sock)
+        if self.state is not None and "dt" in self.state:
+            self.dt = float(self.state.get("dt", 0.0))
 
     def get_tags(self):
-        return np.array(self._state['tags'])
+        return np.array(self.state['tags'])
 
     def get_positions(self):
-        return np.array(self._state['positions'])
+        return np.array(self.state['positions'])
 
     def cases_names(self):
         return self.cases

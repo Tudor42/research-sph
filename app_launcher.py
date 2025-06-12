@@ -7,6 +7,7 @@ import taichi as ti
 import os
 import jax
 
+from application.utils.tkinter_component import get_connection
 from jax_sph.utils import Tag
 
 def update(window: Window):
@@ -32,7 +33,7 @@ if __name__ == "__main__":
     parser.add_argument("--remote", type=bool, default=True)
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=50007)
-    parser.add_argument("--password", type=str, required=True, help="Password clients must provide in init")
+    parser.add_argument("--password", type=str, help="Password clients must provide in init", default="")
 
     args = parser.parse_args()
 
@@ -41,6 +42,9 @@ if __name__ == "__main__":
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'        # pick GPU #0
     jax.config.update('jax_platform_name', 'gpu')   # force GPU
 
-    sm  = RemoteStateManager(args.host, args.port, args.password)
+    if args.password == "":
+        sm = get_connection()
+    else:
+        sm  = RemoteStateManager(args.host, args.port, args.password)
     gui = Window(arch=ti.cuda, state_manager=sm)
     gui.run(update_fn=update)

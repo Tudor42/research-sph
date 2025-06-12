@@ -33,9 +33,9 @@ def _process_command(sm, cmd):
         sm.select_solver(cmd.get("solver"))
         return make_payload(sm)
     if name == "cases":
-        return {"cases": sm.cases_names()}
+        return {"cases": sm.cases_names(), "selected_case": sm.case_manager.curr_case_name}
     if name == "solvers":
-        return {"solvers": sm.solvers_names()}
+        return {"solvers": sm.solvers_names(), "selected_solver": sm.solver_manager.curr_solver_name}
     return None
 
 
@@ -51,8 +51,11 @@ def handle_client(sm, conn: socket.socket, addr, password):
     conn.settimeout(3.0)
     try:
         cmd = recv_msg(conn)
-        if not cmd or cmd.get("cmd") != "init" or cmd.get("password") != password:
-            send_msg(conn, {"error": "Authentification failed"})
+        if not cmd or cmd.get("cmd") != "init":
+            send_msg(conn, {"error": "Authentification failed: invalid initial message"})
+            return
+        if cmd.get("password") != password:
+            send_msg(conn, {"error": "Authentification failed: invalid password"})
             return
         send_msg(conn, make_payload(sm))
         conn.settimeout(None)

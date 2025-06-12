@@ -86,7 +86,7 @@ class Window:
                 self.run_sim = not self.run_sim
             elif e.key == 'r' and (self.mode == "normal"):
                 self.state_manager.reset_scene()
-            elif e.key == 'o' and self.mode == "normal":
+            elif e.key == 'o' and self.mode == "select case":
                 print(open_case_file())
         
         h = self.handlers.get(self.mode)
@@ -108,10 +108,10 @@ class Window:
             gui.text("TIME: " + str(self.state_manager.step * self.state_manager.dt))
             self.radius = gui.slider_float("Particles Radius", self.radius, 1, 10)
             self.steps_before_draw = gui.slider_int("Simulation steps before drawing", self.steps_before_draw, 1, 10)
-            show_str = [f"l{name[0]}: {name}" for i, name in enumerate(self.state_manager.cases_names())]
-            gui.text("Choose test case pres:\n\t" + "\n\t".join(show_str))
-            show_str = [f"l{name[0]}: {name}" for name in self.state_manager.solvers_names()]
-            gui.text("Choose solver:\n" + "\n\t".join([""]))
+            show_str = [f"l{name[0]}: {name}" + (" *" if name==self.state_manager.select_case else "") for i, name in enumerate(self.state_manager.cases_names())]
+            gui.text("Choose test case:\n\t" + "\n\t".join(show_str))
+            show_str = [f"m{name[0]}: {name}" + (" *" if name==self.state_manager.select_solver else "") for name in self.state_manager.solvers_names()]
+            gui.text("Choose solver:\n\t" + "\n\t".join(show_str))
             gui.end()
 
             self._process_event()

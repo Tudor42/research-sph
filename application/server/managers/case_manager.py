@@ -18,6 +18,7 @@ class CaseManager:
         return list(self.cases.keys())
     
     def select(self, identifier):
+        self.curr_case_name = identifier
         case = self.cases[identifier]
         args = OmegaConf.create(dict(config=os.path.join("cases", identifier + ".yaml")))
         cfg = load_embedded_configs(args)
