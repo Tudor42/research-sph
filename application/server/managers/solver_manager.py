@@ -32,7 +32,7 @@ class SolverManager:
             identifier = list(self.solvers)[identifier]
         self.curr_solver_name = identifier
         if self.curr_solver_name == "cconv":
-            self.model_cfg = get_model_cfg("ckp/cconv_FT2D_every250_20250607-200713/best")
+            self.model_cfg = get_model_cfg("ckp/cconv_dam2d_20250607-105606/best")
         elif self.curr_solver_name == "gns":
             self.model_cfg = None
         else:

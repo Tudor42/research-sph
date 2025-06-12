@@ -23,7 +23,7 @@ class RemoteStateManager:
         self.selected_case = msg["selected_case"]
         send_msg(self.sock, {'cmd': 'solvers'})
         msg = recv_msg(self.sock)
-        self.cases = msg["solvers"]
+        self.solvers = msg["solvers"]
         self.selected_solver = msg["selected_solver"]
 
         if self.state is not None:
@@ -64,10 +64,12 @@ class RemoteStateManager:
 
     def select_case(self, case_name):
         self._update_state({'cmd': 'select_case', 'case': case_name})
+        self.selected_case = case_name
         self.step = 0
 
     def select_solver(self, solver_name):
         self._update_state({'cmd': 'select_solver', 'solver': solver_name})
+        self.selected_solver = solver_name
         self.step = 0
 
     def reset_scene(self):
