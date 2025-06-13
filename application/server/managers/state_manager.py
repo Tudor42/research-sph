@@ -26,6 +26,9 @@ class StateManager:
     def get_positions(self):
         return self.state["r"]
 
+    def get_velocities(self):
+        return self.state["u"]
+
     def select_case(self, case_name):
         self.case_manager.select(case_name)
         # self.solver_manager.init_solver(self.case_manager)

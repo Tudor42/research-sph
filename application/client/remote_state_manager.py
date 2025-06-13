@@ -56,6 +56,9 @@ class RemoteStateManager:
     def get_positions(self):
         return np.array(self.state['positions'])
 
+    def get_velocities(self):
+        return np.array(self.state["velocities"])
+
     def cases_names(self):
         return self.cases
 

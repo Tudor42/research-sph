@@ -13,13 +13,28 @@ from jax_sph.utils import Tag
 def update(window: Window):
     tags = window.state_manager.get_tags()
     positions = window.state_manager.get_positions()
-
+    vels = window.state_manager.get_velocities()
     valid = tags != Tag.PAD_VALUE
     tags = tags[valid]
     pts  = positions[valid]
 
+    speeds = jnp.linalg.norm(vels, axis=1)
+    eps = 1e-8
+    s_min = 0
+    s_max = 1
+    norm = ( speeds - s_min) / (s_max - s_min + eps)
+
+    if True:
+        per_vertex_color = jnp.stack([
+            norm,
+            jnp.full_like(norm, 0.2),
+            1.0 - norm,
+            jnp.ones_like(norm),
+        ], axis=1)
+    else:
+        per_vertex_color = jnp.array((0.2, 0.5, 0.9, 1.0))
     fluid_mask = tags == Tag.FLUID
-    per_vertex_color = jnp.where(fluid_mask[:, None], jnp.array((0.2, 0.5, 0.9, 1.0)), jnp.array((0.7, 0.7, 0.7, 1.0)))
+    per_vertex_color = jnp.where(fluid_mask[:, None], per_vertex_color, jnp.array((0.7, 0.7, 0.7, 1.0)))
 
     gui.draw_circles(
         pts,

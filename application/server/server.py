@@ -11,9 +11,8 @@ def make_payload(state_manager):
     return {
         'tags': np.array(state_manager.get_tags()),
         'positions': np.array(state_manager.get_positions()),
+        'velocities': np.array(state_manager.get_velocities()),
         'dt': state_manager.dt,
-        'cases': state_manager.cases_names(),
-        'solvers': state_manager.solvers_names(),
     }
 
 def _process_command(sm, cmd):
