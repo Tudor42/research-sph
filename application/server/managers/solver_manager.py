@@ -61,12 +61,14 @@ class SolverManager:
             self.input_seq_length = self.model_cfg.model.input_seq_length
             self.select("wcsph")
             self.init_solver(case_manager)
-            state = case_manager.state
-            seq = [state['r']]
-            for step in range(self.input_seq_length - 1):
+            state = jax.tree_util.tree_map(lambda x: jnp.array(x), case_manager.state)
+            seq = []
+            for step in range(1, 100 * (self.input_seq_length) + 1):
                 state = self.next(case_manager, step, state)
-                seq.append(state['r'])
+                if step % 100 == 0: 
+                    seq.append(state['r'])
             self.seq0 = jnp.stack(seq, axis=1)
+            self.select("gns")
         self.neighbors0 = self.neighbors
 
     def next(self, case_manager, step, state):
@@ -111,11 +113,11 @@ class SolverManager:
             self.neighbors = neighbors_
         pred, self.model_state = self.model_apply(self.model_params, self.model_state, (features, state["tag"]))
 
-        state["u"] = jnp.where(non_kinematic_mask, self.displacement_fn_vmap(pred["pos"], state["r"]) / dt, state["u"])
-        state["r"] = jnp.where(non_kinematic_mask, pred["pos"], state["r"])
-        
+        state["u"] = jnp.where(non_kinematic_mask, self.displacement_fn_vmap(pred["pos"], self.seq[:, -1]) / dt, self.displacement_fn_vmap(features["abs_pos"][:, 0], self.seq[:, -1]) / dt)
+        state["r"] = jnp.where(non_kinematic_mask, pred["pos"], features["abs_pos"][:, 0])
+        r_copy = jnp.array(state["r"])
         tail = self.seq[:, 1:, :]
-        self.seq = jnp.concatenate([tail, state["r"][:, None, :]], axis=1)
+        self.seq = jnp.concatenate([tail, r_copy[:, None, :]], axis=1)
 
         return state
 
@@ -123,7 +125,7 @@ class SolverManager:
     def create_features(self, position_seq, state, neighbors, g_ext_fn, bc_fn, shift_fn, cfg, step):
         dt = cfg.solver.dt * 100
         tvf = cfg.solver.tvf
-        forces = g_ext_fn(position_seq[:, -1], cfg.solver.dt * step)
+        forces = g_ext_fn(position_seq[:, -1], dt * step)
         non_kinematic_mask = jnp.logical_not(get_kinematic_mask(state["tag"]))[:, None]
 
         most_recent_positions = position_seq[:, -1]
@@ -132,11 +134,11 @@ class SolverManager:
         vel2_candidate = vel1 + dt * forces
         pos2_candidate = shift_fn(most_recent_positions, dt * (vel2_candidate + vel1) / 2.0)
         
-        state = bc_fn(state, dt * step)
-        state["u"] += 1.0 * dt * state["dudt"]
-        state["v"] = state["u"] + tvf * 0.5 * dt * state["dvdt"]
+        _state = bc_fn(state, dt * step)
+        _state["u"] += 1.0 * dt * _state["dudt"]
+        _state["v"] = _state["u"] + tvf * 0.5 * dt * _state["dvdt"]
 
-        wall_pos = shift_fn(state["r"], 1.0 * dt * state["v"])
+        wall_pos = shift_fn(position_seq[:, -1], 1.0 * dt * _state["v"])
         
         most_recent_position = jnp.where(non_kinematic_mask, pos2_candidate, wall_pos)
 
@@ -146,7 +148,7 @@ class SolverManager:
        
         features = {}
         features["abs_pos"] = most_recent_position[:, None]
-        features["vel2_candidates"] = jnp.where(non_kinematic_mask, vel2_candidate, self.displacement_fn_vmap(most_recent_position, self.seq[:, -1]) / dt)        
+        features["vel2_candidates"] = jnp.where(non_kinematic_mask, vel2_candidate, self.displacement_fn_vmap(most_recent_position, position_seq[:, -1]) / dt)        
         receivers, senders = neighbors.idx
         features["senders"] = senders
         features["receivers"] = receivers
