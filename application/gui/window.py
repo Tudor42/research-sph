@@ -2,7 +2,7 @@ import taichi as ti
 import numpy as np
 
 
-from application.server.managers.state_manager import StateManager
+from application.server.managers.state_manager import StateManagerImpl
 from application.utils.tkinter_component import open_case_file
 from .camera import Camera2D
 
@@ -15,8 +15,8 @@ class Window:
                  arch=ti.cpu, 
                  state_manager=None):
         ti.init(arch=arch)
-        self.state_manager = state_manager or StateManager()
-
+        self.state_manager = state_manager or StateManagerImpl()
+        self.gradient = True
         self.gui = ti.ui.Window(title,
                                 res=resolution,
                                 fps_limit=fps_limit)
@@ -88,6 +88,8 @@ class Window:
                 self.state_manager.reset_scene()
             elif e.key == 'o' and self.mode == "select case":
                 print(open_case_file())
+            elif e.key == 'c' and self.mode == "normal":
+                self.gradient = not self.gradient
         
         h = self.handlers.get(self.mode)
         if h is None:

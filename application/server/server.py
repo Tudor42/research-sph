@@ -1,40 +1,44 @@
 import socket
 import threading
 import numpy as np
-from application.server.managers.state_manager import StateManager
+from application.server.managers.state_manager import StateManagerImpl
 from application.utils.network import recv_msg, send_msg
 
 _connection_count = 0
 _conn_count_lock = threading.Lock()
 
-def make_payload(state_manager):
+def make_state_payload(state_manager):
     return {
-        'tags': np.array(state_manager.get_tags()),
+        'tag': np.array(state_manager.get_tags()),
         'positions': np.array(state_manager.get_positions()),
         'velocities': np.array(state_manager.get_velocities()),
-        'dt': state_manager.dt,
     }
+
+def make_response(sm):
+    return {"state": make_state_payload(sm), "curr_timestamp": sm.curr_timestamp, "save_folder": sm.get_current_save_directory()}
 
 def _process_command(sm, cmd):
     name = cmd.get("cmd")
-    if name == "init":
-        return make_payload(sm)
-    if name == "step":
-        sm.advance()
-        return make_payload(sm)
-    if name == "reset":
-        sm.reset_scene()
-        return make_payload(sm)
-    if name == "select_case":
-        sm.select_case(cmd.get("case"))
-        return make_payload(sm)
-    if name == "select_solver":
-        sm.select_solver(cmd.get("solver"))
-        return make_payload(sm)
+
     if name == "cases":
         return {"cases": sm.cases_names(), "selected_case": sm.case_manager.curr_case_name}
     if name == "solvers":
         return {"solvers": sm.solvers_names(), "selected_solver": sm.solver_manager.curr_solver_name}
+    
+    if name == "init":
+        return make_response(sm)
+    if name == "step":
+        sm.advance()
+        return make_response(sm)
+    if name == "reset":
+        sm.reset_scene()
+        return make_response(sm)
+    if name == "select_case":
+        sm.select_case(cmd.get("case"))
+        return make_response(sm)
+    if name == "select_solver":
+        sm.select_solver(cmd.get("solver"))
+        return make_response(sm)
     return None
 
 
@@ -56,7 +60,7 @@ def handle_client(sm, conn: socket.socket, addr, password):
         if cmd.get("password") != password:
             send_msg(conn, {"error": "Authentification failed: invalid password"})
             return
-        send_msg(conn, make_payload(sm))
+        send_msg(conn, make_state_payload(sm))
         conn.settimeout(None)
         while True:
             try:
@@ -78,7 +82,7 @@ def handle_client(sm, conn: socket.socket, addr, password):
                     send_msg(conn, {"error": err_msg})
                 except Exception:
                     pass
-                break
+                continue
             if result is not None:
                 send_msg(conn, result)
     except socket.timeout:
@@ -90,7 +94,7 @@ def handle_client(sm, conn: socket.socket, addr, password):
         conn.close()
 
 def main(password, host="127.0.0.1", port=50007):
-    sm = StateManager()
+    sm = StateManagerImpl()
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((host, port))

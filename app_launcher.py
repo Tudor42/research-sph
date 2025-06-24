@@ -24,7 +24,7 @@ def update(window: Window):
     s_max = 1
     norm = ( speeds - s_min) / (s_max - s_min + eps)
 
-    if True:
+    if window.gradient:
         per_vertex_color = jnp.stack([
             norm,
             jnp.full_like(norm, 0.2),
@@ -45,7 +45,6 @@ def update(window: Window):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--remote", type=bool, default=True)
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=50007)
     parser.add_argument("--password", type=str, help="Password clients must provide in init", default="")
@@ -54,9 +53,8 @@ if __name__ == "__main__":
 
     config.update("jax_enable_x64", True)
  
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0'        # pick GPU #0
-    jax.config.update('jax_platform_name', 'gpu')   # force GPU
-
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'       
+    jax.config.update('jax_platform_name', 'gpu')
     if args.password == "":
         sm = get_connection()
     else:

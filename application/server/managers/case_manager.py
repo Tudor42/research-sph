@@ -11,7 +11,8 @@ class CaseManager:
     def __init__(self):
         self.cases = {
             "db": load_case("cases/", "db.py"),
-            "ft2d": load_case("cases/", "ft2d.py")
+            "ft2d": load_case("cases/", "ft2d.py"),
+            "empty": load_case("cases/", "empty.py")
         }
     
     def list_names(self):
@@ -22,8 +23,10 @@ class CaseManager:
         case = self.cases[identifier]
         args = OmegaConf.create(dict(config=os.path.join("cases", identifier + ".yaml")))
         cfg = load_embedded_configs(args)
-        _state = self.do_relaxation(case, cfg)
-        cfg.state0_path=str(os.path.join("sim_data", "relaxed", identifier + "_2_0.02_2.h5"))
+        if identifier == "db" or identifier == "ft2d":
+            if not os.path.exists(os.path.join("sim_data", "relaxed", identifier, identifier + "_2_0.02_2.h5")):
+                _ = self.do_relaxation(case, cfg)
+            cfg.state0_path=str(os.path.join("sim_data", "relaxed", identifier, identifier + "_2_0.02_2.h5"))
         self._current = case(cfg)
         (
             self.cfg,
@@ -38,12 +41,12 @@ class CaseManager:
             self.shift_fn,
         ) = self._current.initialize()
 
-    def do_relaxation(self, case, cfg):
+    def do_relaxation(self, case, cfg, identifier):
         cfg = copy.deepcopy(cfg)
         cfg.case.mode = "rlx"
         cfg.case.r0_noise_factor = 0.25
         cfg.solver.tvf = 1.0
-        cfg.io.data_path=str(os.path.join("sim_data", "relaxed"))
+        cfg.io.data_path=str(os.path.join("sim_data", "relaxed", identifier))
         cfg.seed = 2
         case = set_relaxation(case, cfg)
         (
@@ -58,16 +61,16 @@ class CaseManager:
             self.displacement_fn,
             self.shift_fn,
         ) = case.initialize()
-        cfg = self.cfg
+        
         advance, neighbor_fn, neighbors, num_particles = create_wcsph(self)
         state = self.state
         _state, _neighbors = advance(0.0, state, neighbors)
         _state["v"].block_until_ready()
-        dir = io_setup(cfg)
+        dir = io_setup(self.cfg)
 
-        for step in range(cfg.solver.sequence_length + 2):        
-            write_state(step - 1, state, dir, cfg)
-            state_, neighbors_ = advance(cfg.solver.dt, state, neighbors, step * cfg.solver.dt)
+        for step in range(self.cfg.solver.sequence_length + 2):        
+            write_state(step - 1, state, dir, self.cfg)
+            state_, neighbors_ = advance(self.cfg.solver.dt, state, neighbors, step * self.cfg.solver.dt)
 
             if neighbors_.did_buffer_overflow:
                 edges_ = neighbors.idx.shape
@@ -77,6 +80,6 @@ class CaseManager:
 
                 # To run the loop N times even if sometimes did_buffer_overflow > 0
                 # we directly rerun the advance step here
-                state, neighbors = advance(cfg.solver.dt, state, neighbors)
+                state, neighbors = advance(self.cfg.solver.dt, state, neighbors)
             else:
                 state, neighbors = state_, neighbors_

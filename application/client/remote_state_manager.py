@@ -1,33 +1,86 @@
 import socket
 import sys
 import numpy as np
+from application.state_manager import StateManager
 from application.utils.network import send_msg, recv_msg
 
-class RemoteStateManager:
+class RemoteStateManager(StateManager):
     """State manager communicating with a remote simulation server."""
 
     def __init__(self, host="127.0.0.1", port=50007, password=""):
         self.sock = socket.create_connection((host, port))
-        self.dt = 0.0
-        self.step = 0
-        send_msg(self.sock, {"cmd": "init", "password": password})
-        self.state = recv_msg(self.sock)
+        self._send_msg({"cmd": "init", "password": password})
+        self._send_msg({'cmd': 'cases'})
+        self._send_msg({'cmd': 'solvers'})
+        
+        self.state = None
+        self.timestamp = 0.0
+        self.save_folder = "/tmp"
+        self.cases_names = []
+        self.solvers_names = []
+        self.select_solver = ""
+        self.select_case = ""
 
-        if "error" in self.state:
-            print("Error while connecting", self.state["error"])
-            return
 
-        send_msg(self.sock, {'cmd': 'cases'})
+    def _send_msg(self, msg):
+        send_msg(self.sock, msg)
         msg = recv_msg(self.sock)
-        self.cases = msg["cases"]
-        self.selected_case = msg["selected_case"]
-        send_msg(self.sock, {'cmd': 'solvers'})
-        msg = recv_msg(self.sock)
-        self.solvers = msg["solvers"]
-        self.selected_solver = msg["selected_solver"]
+        if "error" in msg:
+            raise RuntimeError(msg["error"])
+        if "save_folder" in msg:
+            self.save_folder = msg["save_folder"]
+        if "state" in msg:
+            self.state = msg["state"]
+            # save self.state in save_folder, the frames will be saved in save_folder under frames subfolder
+        if "curr_timestamp" in msg:
+            self.timestamp = msg["curr_timestamp"]
+        if "case_names" in msg:
+            self.cases_names = msg["case_names"]
+        if "solver_names" in msg:
+            self.solvers_names = msg["solver_names"]
+        if "selected_solver" in msg:
+            self.select_solver = msg["selected_solver"]
+        if "selected_case" in msg:
+            self.select_case = msg["selected_case"]
 
+    def get_tags(self):
         if self.state is not None:
-            self.dt = float(self.state.get("dt", 0.0))
+            return np.array(self.state['tag'])
+        else:
+            return np.array()
+
+    def get_positions(self):
+        if self.state is not None:
+            return np.array(self.state['positions'])
+        else:
+            return np.array()
+
+    def get_velocities(self):
+        if self.state is not None:
+            return np.array(self.state['velocities'])
+        else:
+            return np.array()
+
+    def cases_names(self):
+        return self.cases_names
+
+    def solvers_names(self):
+        return self.solvers_names
+
+    def select_case(self, case_name):
+        self._send_msg({'cmd': 'select_case', 'case': case_name})
+
+    def select_solver(self, solver_name):
+        self._send_msg({'cmd': 'select_solver', 'solver': solver_name})
+
+    def reset_scene(self):
+        self._send_msg({'cmd': 'reset'})
+
+    def advance(self):
+        self._send_msg({'cmd': 'step'})
+
+    def get_current_save_directory(self) -> str:
+        return self.save_folder
 
     def close(self):
         if self.sock:
@@ -43,42 +96,3 @@ class RemoteStateManager:
 
     def __exit__(self, exc_type, exc, tb):
         self.close()
-
-    def _update_state(self, cmd):
-        send_msg(self.sock, cmd)
-        self.state = recv_msg(self.sock)
-        if self.state is not None and "dt" in self.state:
-            self.dt = float(self.state.get("dt", 0.0))
-
-    def get_tags(self):
-        return np.array(self.state['tags'])
-
-    def get_positions(self):
-        return np.array(self.state['positions'])
-
-    def get_velocities(self):
-        return np.array(self.state["velocities"])
-
-    def cases_names(self):
-        return self.cases
-
-    def solvers_names(self):
-        return self.solvers
-
-    def select_case(self, case_name):
-        self._update_state({'cmd': 'select_case', 'case': case_name})
-        self.selected_case = case_name
-        self.step = 0
-
-    def select_solver(self, solver_name):
-        self._update_state({'cmd': 'select_solver', 'solver': solver_name})
-        self.selected_solver = solver_name
-        self.step = 0
-
-    def reset_scene(self):
-        self._update_state({'cmd': 'reset'})
-        self.step = 0
-
-    def advance(self):
-        self._update_state({'cmd': 'step'})
-        self.step += 1
