@@ -1,10 +1,12 @@
 from functools import partial
 import jax
 import jax.numpy as jnp
+import numpy as np
 from omegaconf import OmegaConf
 from application.utils.create_solvers import create_model, create_wcsph
 from jax_sph.jax_md import space
 import os
+from lagrangebench.data.utils import get_dataset_stats
 from lagrangebench.utils import get_kinematic_mask
 from main import load_embedded_configs
 
@@ -34,22 +36,71 @@ class SolverManager:
         if self.curr_solver_name == "wcsph":
             self.advance, self.neighbor_fn, self.neighbors, self.num_particles = create_wcsph(case_manager)
         else:
-            #self._warmup()
+            self._warmup(case_manager)
             self._init_nn(case_manager)
-        self._initialized = True
+        self.is_solver_initialized = True
+
+    def _warmup(self, case_manager):
+        T = int(self.model_cfg.model.input_seq_length)
+        prev = self.curr_solver_name
+        self.select("wcsph")
+        self.init_solver(case_manager)
+        state = jax.tree_util.tree_map(lambda x: jnp.array(x), case_manager.state)
+        seq = []
+        for step in range(1, T * 100 + 1):
+            state_, neighbors_ = self.advance(case_manager.cfg.solver.dt, state, self.neighbors, step * case_manager.cfg.solver.dt)
+            if neighbors_.did_buffer_overflow:
+                edges_ = self.neighbors.idx.shape
+                print(f"Reallocate neighbors list {edges_} at step {step}")
+                self.neighbors = self.neighbor_fn.allocate(state["r"], num_particles=self.num_particles)
+                print(f"To list {self.neighbors.idx.shape}")
+
+                state, self.neighbors = self.advance(case_manager.cfg.solver.dt, state, self.neighbors, step * case_manager.cfg.solver.dt)
+            else:
+                state, self.neighbors = state_, neighbors_
+            if step % 100 == 0:
+                seq.append(state["r"])
+        # stack into (N, T, dim)
+        self.seq0 = jnp.stack(seq, axis=1)
+        # restore original solver selection
+        self.select(prev)
 
     def _init_nn(self, case_manager):
-        self.model_apply, self.model_params, 
-        self.model_state, self.neighbor_fn, self.neighbors, 
-        self.input_seq_length, self.num_particles = create_model(case_manager, self.model_cfg, self.curr_solver_name)
+        num_particles = None
+        if case_manager.curr_case_name == "db":
+            L, H = 5.366, 2.0
+            r = self.seq0[:, 0]
+            tag = case_manager.state["tag"]
+            mask_bottom = np.where(r[:, 1] < 2 * case_manager.cfg.case.dx, False, True)
+            mask_lid = np.where(r[:, 1] > H + 4 * case_manager.cfg.case.dx, False, True)
+            mask_left = np.where(
+                ((r[:, 0] < 2 * case_manager.cfg.case.dx) * (tag == 1)), False, True
+            )
+            mask_right = np.where(
+                (r[:, 0] > L + 4 * case_manager.cfg.case.dx) * (tag == 1), False, True
+            )
+            mask = mask_bottom * mask_lid * mask_left * mask_right
+            
+            self.seq0 = self.seq0[mask]
+            self.mask = mask
+            num_particles =  mask.sum()
+        
+        self.model_apply, self.model_params, self.model_state, self.neighbor_fn, self.neighbors, self.input_seq_length, self.num_particles = create_model(case_manager, self.model_cfg, self.curr_solver_name, num_particles)
         self.integrate_fn = get_integrate_func(case_manager.displacement_fn, case_manager.shift_fn)
 
     def next(self, case_manager, step, state):
         if not self.is_solver_initialized:
             self.init_solver(case_manager)
             self.is_solver_initialized = True
-        if step == 0:
-            self.seq = jnp.concat(self.input_seq_length * [state["r"]], axis=1)
+        if step == 0 and self.curr_solver_name != "wcsph":
+            def _maybe_mask(x):
+                if isinstance(x, jnp.ndarray) and x.ndim > 0 and x.shape[0] == self.mask.shape[0]:
+                    return x[self.mask]
+                else:
+                    return x
+
+            state = jax.tree_util.tree_map(_maybe_mask, state)
+            self.seq = jnp.array(self.seq0)
 
         if self.curr_solver_name == "wcsph":
             state_, neighbors_ = self.advance(case_manager.cfg.solver.dt, state, self.neighbors, step * case_manager.cfg.solver.dt)
@@ -63,7 +114,7 @@ class SolverManager:
             else:
                 state, self.neighbors = state_, neighbors_
             return state
-        elif self.curr_solver_name == "cconv":
+        else:
             return self.advance_nn_model(case_manager, step, state)
 
 
@@ -84,7 +135,7 @@ class SolverManager:
             self.neighbors = neighbors_
         pred, self.model_state = self.model_apply(self.model_params, self.model_state, (features, state["tag"]))
         pos = self.integrate_fn(pred, self.seq)
-        state["u"] = jnp.where(non_kinematic_mask, self.displacement_fn_vmap(pos, self.seq[:, -1]) / dt, self.displacement_fn_vmap(features["abs_pos"][:, 0], self.seq[:, -1]) / dt)
+        state["u"] = jnp.where(non_kinematic_mask, jax.vmap(case_manager.displacement_fn, in_axes=(0, 0))(pos, self.seq[:, -1]) / dt, jax.vmap(case_manager.displacement_fn, in_axes=(0, 0))(features["abs_pos"][:, 0], self.seq[:, -1]) / dt)
         state["r"] = jnp.where(non_kinematic_mask, pos, features["abs_pos"][:, 0])
         r_copy = jnp.array(state["r"])
         tail = self.seq[:, 1:, :]
@@ -98,16 +149,25 @@ class SolverManager:
         forces = g_ext_fn(position_seq[:, -1], dt * step)
         non_kinematic_mask = jnp.logical_not(get_kinematic_mask(tags))[:, None]
         default_connectivity_radius = 0.029
-        velocity_stats = {
-            "mean": [
+        normalization_stats = {
+            "vel_mean": jnp.array([
                 0.0040724738501012325,
                 -0.0007674989756196737
-            ],
-            "std": [
+            ]),
+            "vel_std": jnp.array([
                 0.0125808697193861,
                 0.005147312767803669
-            ],
+            ]),
+            "acc_mean": jnp.array([
+                -1.4104562978900503e-05,
+                1.7534126754981116e-06
+            ]),
+            "acc_std": jnp.array([
+                0.0006388923502527177,
+                0.0007237975369207561
+            ])
         }
+        normalization_stats = get_dataset_stats(normalization_stats, False, 0.001)
         displacement_fn_vmap = jax.vmap(displacement_fn, in_axes=(0, 0))    
         displacement_fn_dvmap = jax.vmap(displacement_fn_vmap, in_axes=(0, 0))
         if model_name == "cconv":
@@ -146,6 +206,7 @@ class SolverManager:
             n_total_points = position_seq.shape[0]
             most_recent_position = position_seq[:, -1] 
             velocity_sequence = displacement_fn_dvmap(position_seq[:, 1:], position_seq[:, :-1])
+            velocity_stats = normalization_stats["velocity"]
             normalized_velocity_sequence = (
                 velocity_sequence - velocity_stats["mean"]
             ) / velocity_stats["std"]
@@ -156,7 +217,7 @@ class SolverManager:
             features["vel_hist"] = flat_velocity_sequence
             
             neighbors = neighbors.update(
-                position_seq[:-1], num_particles=self.num_particles
+                position_seq[:, -1], num_particles=self.num_particles
             )
             receivers, senders = neighbors.idx
             features["senders"] = senders
@@ -171,6 +232,7 @@ class SolverManager:
                 normalized_relative_displacements
             )
             features["rel_dist"] = normalized_relative_distances[:, None]
+            features["force"] = forces
         return features, neighbors
 
 def get_model_cfg(ckp_directory):
@@ -192,23 +254,24 @@ def get_integrate_func(displacement_fn, shift_fn):
         assert any([key in normalized_in for key in ["pos", "vel", "acc"]])
 
         normalization_stats = {
-            "vel_mean": [
+            "vel_mean": jnp.array([
                 0.0040724738501012325,
                 -0.0007674989756196737
-            ],
-            "vel_std": [
+            ]),
+            "vel_std": jnp.array([
                 0.0125808697193861,
                 0.005147312767803669
-            ],
-            "acc_mean": [
+            ]),
+            "acc_mean": jnp.array([
                 -1.4104562978900503e-05,
                 1.7534126754981116e-06
-            ],
-            "acc_std": [
+            ]),
+            "acc_std": jnp.array([
                 0.0006388923502527177,
                 0.0007237975369207561
-            ]
+            ])
         }
+        normalization_stats = get_dataset_stats(normalization_stats, False, 0.001)
         if "pos" in normalized_in:
             # Zeroth euler step
             return normalized_in["pos"]
@@ -216,13 +279,15 @@ def get_integrate_func(displacement_fn, shift_fn):
             most_recent_position = position_sequence[:, -1]
             if "vel" in normalized_in:
                 # invert normalization
-                new_velocity = normalization_stats["vel_mean"] + (
-                    normalized_in["vel"] * normalization_stats["vel_std"]
+                velocity_stats = normalization_stats["velocity"]
+                new_velocity = velocity_stats["mean"] + (
+                    normalized_in["vel"] * velocity_stats["std"]
                 )
             elif "acc" in normalized_in:
                 # invert normalization.
-                acceleration = normalization_stats["acc_mean"] + (
-                    normalized_in["acc"] * normalization_stats["acc_std"]
+                acceleration_stats = normalization_stats["acceleration"]
+                acceleration = acceleration_stats["mean"] + (
+                    normalized_in["acc"] * acceleration_stats["std"]
                 )
                 # Second Euler step
                 most_recent_velocity = displacement_fn_set(

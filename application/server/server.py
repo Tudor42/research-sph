@@ -3,7 +3,7 @@ import threading
 import numpy as np
 from application.server.managers.state_manager import StateManagerImpl
 from application.utils.network import recv_msg, send_msg
-
+import traceback
 _connection_count = 0
 _conn_count_lock = threading.Lock()
 
@@ -77,7 +77,8 @@ def handle_client(sm, conn: socket.socket, addr, password):
                 result = _process_command(sm, cmd)
             except Exception as e:
                 err_msg = str(e)
-                print(f"Error processing command from {addr}: {err_msg}")
+                print(f"Error processing command from {addr}: {e}")
+                traceback.print_exc()
                 try:
                     send_msg(conn, {"error": err_msg})
                 except Exception:

@@ -13,13 +13,13 @@ import haiku as hk
 from lagrangebench import models
 from lagrangebench.utils import NodeType, load_haiku
 
-def create_model(case_manager, cfg, model_name):
+def create_model(case_manager, cfg, model_name, num_particles):
     count_array = (case_manager.state["tag"] != Tag.PAD_VALUE).sum()
 
     if hasattr(count_array, "block_until_ready"):
         count_array = count_array.block_until_ready()
-
-    num_particles = int(count_array.item())
+    if num_particles is None:
+        num_particles = int(count_array.item())
 
     load_ckp = cfg.load_ckp
     default_connectivity_radius = 0.029
@@ -60,7 +60,7 @@ def create_model(case_manager, cfg, model_name):
         num_partitions=case_manager.cfg.nl.num_partitions,
         pbc=np.array(case_manager.cfg.case.pbc),
     )
-    neighbors = neighbor_fn.allocate(case_manager.state["r"], num_particles=num_particles)
+    neighbors = neighbor_fn.allocate(case_manager.state["r"][:num_particles], num_particles=num_particles)
     return model_apply, model_params, model_state, neighbor_fn, neighbors, cfg.model.input_seq_length, num_particles
 
 def create_wcsph(case_manager):

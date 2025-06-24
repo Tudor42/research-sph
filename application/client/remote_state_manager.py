@@ -32,10 +32,10 @@ class RemoteStateManager(StateManager):
             # save self.state in save_folder, the frames will be saved in save_folder under frames subfolder
         if "curr_timestamp" in msg:
             self.timestamp = msg["curr_timestamp"]
-        if "case_names" in msg:
-            self.cases = msg["case_names"]
-        if "solver_names" in msg:
-            self.solvers = msg["solver_names"]
+        if "cases" in msg:
+            self.cases = msg["cases"]
+        if "solvers" in msg:
+            self.solvers = msg["solvers"]
         if "selected_solver" in msg:
             self.selected_solver = msg["selected_solver"]
         if "selected_case" in msg:
