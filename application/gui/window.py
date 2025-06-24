@@ -1,5 +1,8 @@
+import os
 import taichi as ti
 import numpy as np
+import tkinter as tk
+from tkinter import messagebox
 
 
 from application.server.managers.state_manager import StateManagerImpl
@@ -116,9 +119,29 @@ class Window:
             gui.text("Choose solver:\n\t" + "\n\t".join(show_str))
             gui.end()
 
-            self._process_event()
+            try:
+                self._process_event()
+            except Exception as e:
+                root = tk.Tk()
+                root.withdraw()  
+                messagebox.showerror("Input Processing Error", str(e))
+                root.destroy()
+                continue
+
             if self.run_sim:
                 for _ in range(self.steps_before_draw):
-                    self.state_manager.advance()
+                    try:
+                        self.state_manager.advance()
+                    except Exception as e:
+                        root = tk.Tk(); root.withdraw()
+                        messagebox.showerror("Simulation Error", "Simulation stopped because of the error: " + str(e))
+                        self.run_sim = False
+                        root.destroy()
+                        break
             update_fn(self)
             self.gui.show()
+            if self.state_manager.save_next_frame:
+                fname = f"{self.state_manager.get_timestamp()}.png"
+                path  = os.path.join("rollouts_directory", self.state_manager.get_current_save_directory(), "frames", fname)
+                self.gui.screenshot(path)
+                self.state_manager.save_next_frame = False

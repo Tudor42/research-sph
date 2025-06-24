@@ -64,6 +64,7 @@ class SolverManager:
         self.seq0 = jnp.stack(seq, axis=1)
         # restore original solver selection
         self.select(prev)
+        self.mask = None
 
     def _init_nn(self, case_manager):
         num_particles = None
@@ -84,7 +85,8 @@ class SolverManager:
             self.seq0 = self.seq0[mask]
             self.mask = mask
             num_particles =  mask.sum()
-        
+        else: 
+            self.mask = None
         self.model_apply, self.model_params, self.model_state, self.neighbor_fn, self.neighbors, self.input_seq_length, self.num_particles = create_model(case_manager, self.model_cfg, self.curr_solver_name, num_particles)
         self.integrate_fn = get_integrate_func(case_manager.displacement_fn, case_manager.shift_fn)
 
@@ -93,13 +95,14 @@ class SolverManager:
             self.init_solver(case_manager)
             self.is_solver_initialized = True
         if step == 0 and self.curr_solver_name != "wcsph":
-            def _maybe_mask(x):
-                if isinstance(x, jnp.ndarray) and x.ndim > 0 and x.shape[0] == self.mask.shape[0]:
-                    return x[self.mask]
-                else:
-                    return x
+            if  self.mask is not None:
+                def _maybe_mask(x):
+                    if isinstance(x, jnp.ndarray) and x.ndim > 0 and x.shape[0] == self.mask.shape[0]:
+                        return x[self.mask]
+                    else:
+                        return x
 
-            state = jax.tree_util.tree_map(_maybe_mask, state)
+                state = jax.tree_util.tree_map(_maybe_mask, state)
             self.seq = jnp.array(self.seq0)
 
         if self.curr_solver_name == "wcsph":

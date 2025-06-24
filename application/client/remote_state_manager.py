@@ -9,7 +9,7 @@ class RemoteStateManager(StateManager):
     def __init__(self, host="127.0.0.1", port=50007, password=""):
         self.sock = socket.create_connection((host, port))
         self._send_msg({"cmd": "init", "password": password})
- 
+        self.save_next_frame = False
         self.timestamp = 0.0
         self.save_folder = "/tmp"
         self.cases = []
@@ -29,6 +29,7 @@ class RemoteStateManager(StateManager):
             self.save_folder = msg["save_folder"]
         if "state" in msg:
             self.state = msg["state"]
+            self.save_next_frame = True
             # save self.state in save_folder, the frames will be saved in save_folder under frames subfolder
         if "curr_timestamp" in msg:
             self.timestamp = msg["curr_timestamp"]
