@@ -60,7 +60,7 @@ def handle_client(sm, conn: socket.socket, addr, password):
         if cmd.get("password") != password:
             send_msg(conn, {"error": "Authentification failed: invalid password"})
             return
-        send_msg(conn, make_state_payload(sm))
+        send_msg(conn, make_response(sm))
         conn.settimeout(None)
         while True:
             try:

@@ -25,7 +25,7 @@ class StateManagerImpl(StateManager):
             self.dt = 100 * self.dt
 
     def set_save_directory(self):
-        self.curr_save_directory = self.case_manager.curr_case_name + "_" + self.solver_manager.curr_solver_name + "_" + time.time()
+        self.curr_save_directory = self.case_manager.curr_case_name + "_" + self.solver_manager.curr_solver_name + "_" + str(time.time())
 
     def cases_names(self):
         return self.case_manager.list_names()
@@ -67,3 +67,6 @@ class StateManagerImpl(StateManager):
 
     def get_current_save_directory(self):
         return self.curr_save_directory
+    
+    def get_timestamp(self):
+        return self.curr_timestamp

@@ -12,7 +12,7 @@ class CaseManager:
         self.cases = {
             "db": load_case("cases/", "db.py"),
             "ft2d": load_case("cases/", "ft2d.py"),
-            "empty": load_case("cases/", "empty.py")
+            #"empty": load_case("cases/", "empty.py")
         }
     
     def list_names(self):
@@ -25,7 +25,7 @@ class CaseManager:
         cfg = load_embedded_configs(args)
         if identifier == "db" or identifier == "ft2d":
             if not os.path.exists(os.path.join("sim_data", "relaxed", identifier, identifier + "_2_0.02_2.h5")):
-                _ = self.do_relaxation(case, cfg)
+                _ = self.do_relaxation(case, cfg, identifier)
             cfg.state0_path=str(os.path.join("sim_data", "relaxed", identifier, identifier + "_2_0.02_2.h5"))
         self._current = case(cfg)
         (

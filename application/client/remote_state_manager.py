@@ -1,5 +1,4 @@
 import socket
-import sys
 import numpy as np
 from application.state_manager import StateManager
 from application.utils.network import send_msg, recv_msg
@@ -10,16 +9,15 @@ class RemoteStateManager(StateManager):
     def __init__(self, host="127.0.0.1", port=50007, password=""):
         self.sock = socket.create_connection((host, port))
         self._send_msg({"cmd": "init", "password": password})
-        self._send_msg({'cmd': 'cases'})
-        self._send_msg({'cmd': 'solvers'})
-        
-        self.state = None
+ 
         self.timestamp = 0.0
         self.save_folder = "/tmp"
-        self.cases_names = []
-        self.solvers_names = []
-        self.select_solver = ""
-        self.select_case = ""
+        self.cases = []
+        self.solvers = []
+        self.selected_solver = ""
+        self.selected_case = ""
+        self._send_msg({'cmd': 'cases'})
+        self._send_msg({'cmd': 'solvers'})
 
 
     def _send_msg(self, msg):
@@ -35,13 +33,13 @@ class RemoteStateManager(StateManager):
         if "curr_timestamp" in msg:
             self.timestamp = msg["curr_timestamp"]
         if "case_names" in msg:
-            self.cases_names = msg["case_names"]
+            self.cases = msg["case_names"]
         if "solver_names" in msg:
-            self.solvers_names = msg["solver_names"]
+            self.solvers = msg["solver_names"]
         if "selected_solver" in msg:
-            self.select_solver = msg["selected_solver"]
+            self.selected_solver = msg["selected_solver"]
         if "selected_case" in msg:
-            self.select_case = msg["selected_case"]
+            self.selected_case = msg["selected_case"]
 
     def get_tags(self):
         if self.state is not None:
@@ -62,10 +60,10 @@ class RemoteStateManager(StateManager):
             return np.array()
 
     def cases_names(self):
-        return self.cases_names
+        return self.cases
 
     def solvers_names(self):
-        return self.solvers_names
+        return self.solvers
 
     def select_case(self, case_name):
         self._send_msg({'cmd': 'select_case', 'case': case_name})
@@ -81,6 +79,9 @@ class RemoteStateManager(StateManager):
 
     def get_current_save_directory(self) -> str:
         return self.save_folder
+
+    def get_timestamp(self) -> float:
+        return self.timestamp
 
     def close(self):
         if self.sock:

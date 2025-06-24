@@ -107,7 +107,7 @@ class Window:
         while self.gui.running:
             gui = self.gui.get_gui()
             gui.begin("Mode: " + self.mode, 0.05, 0.05, 0.3, 0.2)
-            gui.text("TIME: " + str(self.state_manager.step * self.state_manager.dt))
+            gui.text("TIME: " + str(self.state_manager.get_timestamp()))
             self.radius = gui.slider_float("Particles Radius", self.radius, 1, 10)
             self.steps_before_draw = gui.slider_int("Simulation steps before drawing", self.steps_before_draw, 1, 10)
             show_str = [f"l{name[0]}: {name}" + (" *" if name==self.state_manager.selected_case else "") for name in self.state_manager.cases_names()]
