@@ -7,6 +7,7 @@ from tkinter import messagebox
 
 from application.server.managers.state_manager import StateManagerImpl
 from application.utils.tkinter_component import open_case_file
+from jax_sph.io_state import write_h5
 from .camera import Camera2D
 
 class Window:
@@ -34,6 +35,7 @@ class Window:
         self.mode = 'normal'
         self.run_sim = False
         self.steps_before_draw = 1
+        self.save_frame = False
 
     def set_camera(self, center, scale):
         self.camera.center = np.array(center, dtype=np.float32)
@@ -93,6 +95,8 @@ class Window:
                 print(open_case_file())
             elif e.key == 'c' and self.mode == "normal":
                 self.gradient = not self.gradient
+            elif e.key == 't' and self.mode == "normal":
+                self.save_frame = not self.save_frame
         
         h = self.handlers.get(self.mode)
         if h is None:
@@ -139,9 +143,15 @@ class Window:
                         root.destroy()
                         break
             update_fn(self)
-            self.gui.show()
-            if self.state_manager.save_next_frame:
+            if self.state_manager.save_next_frame and self.save_frame:
                 fname = f"{self.state_manager.get_timestamp()}.png"
                 path  = os.path.join("rollouts_directory", self.state_manager.get_current_save_directory(), "frames", fname)
-                self.gui.screenshot(path)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                self.gui.save_image(path)
+
+                fname = f"{self.state_manager.get_timestamp()}.h5"
+                path  = os.path.join("rollouts_directory", self.state_manager.get_current_save_directory(), "states", fname)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                write_h5(self.state_manager.state, path)
                 self.state_manager.save_next_frame = False
+            self.gui.show()
