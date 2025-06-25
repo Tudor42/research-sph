@@ -52,17 +52,13 @@ class AFF(hk.Module):
         isTraining=False
     ) -> jnp.ndarray:
         xa = jnp.concatenate([x, y], axis=-1)
-        if self.conv_type == "cconv":
-            inp_feat = xa[senders]
-        else:
-            inp_feat = xa[senders] + xa[receivers]
+        inp_feat = xa[senders]
+        
         xl = self.cconv1(inp_feat, receivers, rel_pos, a)
         xl = self.bn1(xl, is_training=isTraining)
         xl = jax.nn.relu(xl)
-        if self.conv_type == "cconv":
-            inp_feat = xl[senders]
-        else:
-            inp_feat = xl[senders] + xl[receivers]
+        
+        inp_feat = xl[senders]
         xl = self.cconv2(inp_feat, receivers, rel_pos, a)
         xl = self.bn2(xl, is_training=isTraining)
         wei = jax.nn.sigmoid(xl)
@@ -110,38 +106,27 @@ class IAFF(hk.Module):
         isTraining=False
     ) -> jnp.ndarray:
         xa = jnp.concatenate([x, y], axis=-1)
-        # first AFF
-
-        if self.conv_type == "cconv":
-            inp_feat = xa[senders]
-        else:
-            inp_feat = xa[senders] + xa[receivers]
+        inp_feat = xa[senders]
         
         xl = self.cconv1(inp_feat, receivers, rel_pos, a)
         xl = self.bn1(xl, is_training=isTraining)
         xl = jax.nn.relu(xl)
         
-        if self.conv_type == "cconv":
-            inp_feat = xl[senders]
-        else:
-            inp_feat = xl[senders] + xl[receivers]
+        inp_feat = xl[senders]
+
         xl = self.cconv2(inp_feat, receivers, rel_pos, a)
         xl = self.bn2(xl, is_training=isTraining)
         wei1 = jax.nn.sigmoid(xl)
         xo = 2.0 * x * wei1 + 2.0 * y * (1.0 - wei1)
         # second AFF
-        if self.conv_type == "cconv":
-            inp_feat = xo[senders]
-        else:
-            inp_feat = xo[senders] + xo[receivers]
+        inp_feat = xo[senders]
+       
         xl2 = self.cconv3(inp_feat, receivers, rel_pos, a)
         xl2 = self.bn3(xl2, is_training=isTraining)
         xl2 = jax.nn.relu(xl2)
 
-        if self.conv_type == "cconv":
-            inp_feat = xl2[senders]
-        else:
-            inp_feat = xl2[senders] + xl2[receivers]
+        inp_feat = xl2[senders]
+        
         xl2 = self.cconv4(inp_feat, receivers, rel_pos, a)
         xl2 = self.bn4(xl2, is_training=isTraining)
         wei2 = jax.nn.sigmoid(xl2)
@@ -175,7 +160,7 @@ class MyParticleNetwork(BaseModel):
         # initial fluid/obstacle conv and dense
         self.conv0_fluid = ConvLayer(3, self.layer_channels[0])
         self.dense0_fluid = hk.Linear(output_size=self.layer_channels[0])
-        self.conv0_obstacle = ConvLayer(5, self.layer_channels[0])
+        self.conv0_obstacle = ConvLayer(4, self.layer_channels[0])
         
         self.convs = []
         self.denses = []
@@ -190,7 +175,7 @@ class MyParticleNetwork(BaseModel):
         self.aff_ascc = IAFF(channels=32, inter_channels=64, num_particles=num_particles, conv_type='ascc')
         self.conv0_fluid_ascc = ConvLayer(3, self.layer_channels[0], conv_type="ascc")
         self.dense0_fluid_ascc = hk.Linear(output_size=self.layer_channels[0])
-        self.conv0_obstacle_ascc = ConvLayer(5, self.layer_channels[0], conv_type="ascc")
+        self.conv0_obstacle_ascc = ConvLayer(4, self.layer_channels[0], conv_type="ascc")
 
         self.convs_ascc = []
         self.denses_ascc = []
@@ -220,7 +205,7 @@ class MyParticleNetwork(BaseModel):
         fluid_mask = fluid_mask[..., None]  
         
         fluid_feats = jnp.concatenate([jnp.ones((pos2.shape[0],1)), vel2], axis=-1)
-        box_feat = jnp.concatenate([2*jnp.ones((pos2.shape[0],1)), vel2], axis=-1)
+        box_feat = vel2
         #fm = fluid_mask[:, None]  # shape: (num_particles, 1)
         
         fluid_feats = jnp.where(fluid_mask, fluid_feats, 0.0)
@@ -228,11 +213,27 @@ class MyParticleNetwork(BaseModel):
         senders, receivers = features["senders"], features["receivers"]
         
         rel_pos = features["rel_disp"]
-        box_sender_feats = jnp.concatenate([features["rel_disp_from_prev_time"], box_feat[senders]], axis=-1)
 
-        
         fw_mask = (particle_types[senders] != Tag.FLUID) & (particle_types[receivers] == Tag.FLUID) & (receivers != senders)
         ff_mask = (particle_types[senders] == Tag.FLUID) & (particle_types[receivers] == Tag.FLUID) & (receivers != senders)
+
+        wall_norm = -jax.ops.segment_sum(jnp.where(fw_mask[:, None], rel_pos, jnp.zeros_like(rel_pos)), senders, num_segments=self.num_particles)
+        norms = jnp.linalg.norm(wall_norm, axis=1, keepdims=True)  
+        box_feats_norm = jnp.where(fluid_mask, 0.0, wall_norm / (norms + 1e-12))
+        nbr_count = jax.ops.segment_sum(
+            jnp.where(fw_mask, jnp.ones_like(receivers), 0.0),
+            senders,
+            num_segments=self.num_particles)   
+        
+        nbr_sum   = jax.ops.segment_sum(
+            (nbr_count[:, None] * box_feats_norm)[receivers],
+            senders,
+            num_segments=self.num_particles)
+        norms = jnp.linalg.norm(wall_norm, axis=1, keepdims=True)  
+        
+        box_feats_norm = jnp.where(fluid_mask, 0.0, nbr_sum / (norms + 1e-12))
+        box_sender_feats = jnp.concatenate([box_feats_norm[senders], box_feat[senders]], axis=-1)
+        
         w = window_function_batched(features["rel_dist"][:, 0])
         a_fw = jnp.where(fw_mask, w, jnp.array(0.0, dtype=rel_pos.dtype))
         a_ff = jnp.where(ff_mask, w, jnp.array(0.0, dtype=rel_pos.dtype))
@@ -246,7 +247,7 @@ class MyParticleNetwork(BaseModel):
         feats = jnp.concatenate([hybrid, ans_d], axis=-1)
         
         # ascc
-        ans_f_ascc = self.conv0_fluid_ascc(fluid_feats[senders] + fluid_feats[receivers], receivers, rel_pos, a=a_ff)
+        ans_f_ascc = self.conv0_fluid_ascc(fluid_feats[senders], receivers, rel_pos, a=a_ff)
         ans_d_ascc = self.dense0_fluid_ascc(fluid_feats)
         ans_d_ascc = jnp.where(fluid_mask, ans_d_ascc, 0.0)
         obs_f_ascc = self.conv0_obstacle_ascc(box_sender_feats, receivers, rel_pos, a=a_fw)
@@ -289,4 +290,4 @@ class MyParticleNetwork(BaseModel):
         #     init=hk.initializers.Constant(1/109.37)
         # )
         #jax.debug.print("s={}", s)
-        return {"pos": pos2 + 1/110 * ans_convs[-1]}
+        return {"pos": pos2 + 1/128 * ans_convs[-1]}

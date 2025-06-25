@@ -139,7 +139,7 @@ class SolverManager:
         pred, self.model_state = self.model_apply(self.model_params, self.model_state, (features, state["tag"]))
         pos = self.integrate_fn(pred, self.seq)
         state["u"] = jnp.where(non_kinematic_mask, jax.vmap(case_manager.displacement_fn, in_axes=(0, 0))(pos, self.seq[:, -1]) / dt, jax.vmap(case_manager.displacement_fn, in_axes=(0, 0))(features["abs_pos"][:, 0], self.seq[:, -1]) / dt)
-        state["r"] = jnp.where(non_kinematic_mask, pos, features["abs_pos"][:, 0])
+        state["r"] = jnp.where(non_kinematic_mask, pos, features["abs_pos"][:, -1])
         r_copy = jnp.array(state["r"])
         tail = self.seq[:, 1:, :]
         self.seq = jnp.concatenate([tail, r_copy[:, None, :]], axis=1)

@@ -20,7 +20,8 @@ class CConvLayer(hk.Module):
             shape=(kh, kw, self.in_ch, self.out_ch),
             init=init
         )
-        bias = hk.get_parameter("bias", shape=(self.out_ch,), init=jnp.zeros)
+        init = hk.initializers.Constant(0.0)
+        bias = hk.get_parameter("bias", shape=(self.out_ch,), init=init)
         return self.conv_operation(kernel, receivers, relative_positions, features, a) + bias
 
 class ASCC(hk.Module):
@@ -40,7 +41,8 @@ class ASCC(hk.Module):
             shape=(kh, kw, self.in_ch, self.out_ch),
             init=init
         )
-        bias = hk.get_parameter("bias", shape=(self.out_ch,), init=jnp.zeros)
+        init = hk.initializers.Constant(0.0)
+        bias = hk.get_parameter("bias", shape=(self.out_ch,), init=init)
         kernel_flipped = -jnp.flip(kernel, axis=(0,1))
         return self.conv_operation(jnp.concatenate([kernel, kernel_flipped], axis=1), receivers, relative_positions, features, a) + bias
 
