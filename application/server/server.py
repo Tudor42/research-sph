@@ -35,10 +35,10 @@ def _process_command(sm, cmd):
         return make_response(sm)
     if name == "select_case":
         sm.select_case(cmd.get("case"))
-        return make_response(sm)
+        return {"selected_case": sm.case_manager.curr_case_name, **make_response(sm)}
     if name == "select_solver":
         sm.select_solver(cmd.get("solver"))
-        return make_response(sm)
+        return {"selected_solver": sm.solver_manager.curr_solver_name, **make_response(sm)}
     return None
 
 
