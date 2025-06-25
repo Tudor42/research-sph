@@ -423,8 +423,6 @@ def infer(
 def calculate_densities(features, particle_types, kernel, con_radius, mass, n_nodes_max):
     w_dist =  jnp.where(features["senders"] != features["receivers"], kernel(con_radius * features["rel_dist"][:, 0]), 0.0)
     raw_densities = jax.ops.segment_sum(mass * w_dist, features["senders"], n_nodes_max)
-    normalization = jax.ops.segment_sum(w_dist, features["senders"], n_nodes_max)
-    ref_densities = jnp.where(normalization > 0.0, jax.ops.segment_sum(raw_densities[features["receivers"]] * w_dist, features["senders"], n_nodes_max) / normalization, 0.0)
     
     #rho_denominator = jax.ops.segment_sum((mass / (raw_densities+1e-9))[features["receivers"]] * w_dist, features["senders"], n_nodes_max)
     #rho_denominator = jnp.where(rho_denominator > 1, 1, rho_denominator)
@@ -432,7 +430,7 @@ def calculate_densities(features, particle_types, kernel, con_radius, mass, n_no
     #raw_densities = density_block(features["rel_dist"], features["senders"], features["receivers"], mass, con_radius, kernel, n_nodes_max)
     mask = get_kinematic_mask(particle_types)
     
-    return jnp.mean(jnp.where(mask, 0.0, (raw_densities - ref_densities)**2))
+    return jnp.mean(jnp.where(mask, 0.0, (raw_densities - 1)**2))
 
 @partial(jax.checkpoint, static_argnums=(5,6,))
 def density_block(rel_dist, send, recv, mass, con_r, kernel, n):
