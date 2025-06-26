@@ -52,17 +52,12 @@ class AFF(hk.Module):
         isTraining=False
     ) -> jnp.ndarray:
         xa = jnp.concatenate([x, y], axis=-1)
-        if self.conv_type == "cconv":
-            inp_feat = xa[senders]
-        else:
-            inp_feat = xa[senders] + xa[receivers]
+        inp_feat = xa[senders]
+        
         xl = self.cconv1(inp_feat, receivers, rel_pos, a)
         xl = self.bn1(xl, is_training=isTraining)
         xl = jax.nn.relu(xl)
-        if self.conv_type == "cconv":
-            inp_feat = xl[senders]
-        else:
-            inp_feat = xl[senders] + xl[receivers]
+        inp_feat = xl[senders]
         xl = self.cconv2(inp_feat, receivers, rel_pos, a)
         xl = self.bn2(xl, is_training=isTraining)
         wei = jax.nn.sigmoid(xl)
@@ -112,36 +107,24 @@ class IAFF(hk.Module):
         xa = jnp.concatenate([x, y], axis=-1)
         # first AFF
 
-        if self.conv_type == "cconv":
-            inp_feat = xa[senders]
-        else:
-            inp_feat = xa[senders] + xa[receivers]
+        inp_feat = xa[senders]
         
         xl = self.cconv1(inp_feat, receivers, rel_pos, a)
         xl = self.bn1(xl, is_training=isTraining)
         xl = jax.nn.relu(xl)
         
-        if self.conv_type == "cconv":
-            inp_feat = xl[senders]
-        else:
-            inp_feat = xl[senders] + xl[receivers]
+        inp_feat = xl[senders]
         xl = self.cconv2(inp_feat, receivers, rel_pos, a)
         xl = self.bn2(xl, is_training=isTraining)
         wei1 = jax.nn.sigmoid(xl)
         xo = 2.0 * x * wei1 + 2.0 * y * (1.0 - wei1)
         # second AFF
-        if self.conv_type == "cconv":
-            inp_feat = xo[senders]
-        else:
-            inp_feat = xo[senders] + xo[receivers]
+        inp_feat = xo[senders]
         xl2 = self.cconv3(inp_feat, receivers, rel_pos, a)
         xl2 = self.bn3(xl2, is_training=isTraining)
         xl2 = jax.nn.relu(xl2)
 
-        if self.conv_type == "cconv":
-            inp_feat = xl2[senders]
-        else:
-            inp_feat = xl2[senders] + xl2[receivers]
+        inp_feat = xl2[senders]
         xl2 = self.cconv4(inp_feat, receivers, rel_pos, a)
         xl2 = self.bn4(xl2, is_training=isTraining)
         wei2 = jax.nn.sigmoid(xl2)
