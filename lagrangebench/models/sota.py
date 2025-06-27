@@ -6,6 +6,7 @@ from .base import BaseModel
 from typing import Dict, Tuple
 from jax_sph.utils import Tag
 from ..utils_extra.continous_convolution import window_function_batched
+from lagrangebench.utils import NodeType
 
 class AFF(hk.Module):
     """
@@ -143,6 +144,7 @@ class MyParticleNetwork(BaseModel):
         radius: float = 0.025,
         num_particles: int = 0,
         name=None,
+        num_particle_types = NodeType.SIZE
     ):
         super().__init__(name=name)
         self.layer_channels = [32, 64, 128, 64, 2]
@@ -156,9 +158,9 @@ class MyParticleNetwork(BaseModel):
         # AFF and IAFF
         self.aff_cconv = IAFF(32, 64, num_particles=num_particles)
         # initial fluid/obstacle conv and dense
-        self.conv0_fluid = ConvLayer(3, self.layer_channels[0])
+        self.conv0_fluid = ConvLayer(18, self.layer_channels[0])
         self.dense0_fluid = hk.Linear(output_size=self.layer_channels[0])
-        self.conv0_obstacle = ConvLayer(4, self.layer_channels[0])
+        self.conv0_obstacle = ConvLayer(18, self.layer_channels[0])
         
         self.convs = []
         self.denses = []
@@ -171,9 +173,9 @@ class MyParticleNetwork(BaseModel):
             self.convs.append(conv)
         
         self.aff_ascc = IAFF(channels=32, inter_channels=64, num_particles=num_particles, conv_type='ascc')
-        self.conv0_fluid_ascc = ConvLayer(3, self.layer_channels[0], conv_type="ascc")
+        self.conv0_fluid_ascc = ConvLayer(18, self.layer_channels[0], conv_type="ascc")
         self.dense0_fluid_ascc = hk.Linear(output_size=self.layer_channels[0])
-        self.conv0_obstacle_ascc = ConvLayer(4, self.layer_channels[0], conv_type="ascc")
+        self.conv0_obstacle_ascc = ConvLayer(18, self.layer_channels[0], conv_type="ascc")
 
         self.convs_ascc = []
         self.denses_ascc = []
@@ -192,17 +194,23 @@ class MyParticleNetwork(BaseModel):
             aff = AFF(channels=ch, inter_channels=ch, num_particles=self.num_particles, conv_type='cconv')
             self.affs.append(aff)
         self.resAff = AFF(channels=64, inter_channels=64, num_particles=self.num_particles, conv_type='cconv')
+
+        self._embedding = hk.Embed(
+            num_particle_types, 16
+        )  # (9, 16)
         
     def __call__(
         self, sample: Tuple[Dict[str, jnp.ndarray], jnp.ndarray], isTraining=True,
     ) -> Dict[str, jnp.ndarray]:
         features, particle_types = sample
 
+        particle_type_embeddings = self._embedding(particle_types)
+        
         pos2, vel2 = features["abs_pos"][:, 0], features["vel2_candidates"]
         fluid_mask = particle_types == Tag.FLUID
         fluid_mask = fluid_mask[..., None]  
         
-        fluid_feats = jnp.concatenate([jnp.ones((pos2.shape[0],1)), vel2], axis=-1)
+        fluid_feats = jnp.concatenate([particle_type_embeddings, vel2], axis=-1)
         box_feat = vel2
         #fm = fluid_mask[:, None]  # shape: (num_particles, 1)
         
@@ -214,10 +222,10 @@ class MyParticleNetwork(BaseModel):
         fw_mask = (particle_types[senders] != Tag.FLUID) & (particle_types[receivers] == Tag.FLUID) & (receivers != senders)
         ff_mask = (particle_types[senders] == Tag.FLUID) & (particle_types[receivers] == Tag.FLUID) & (receivers != senders)
        
-        wall_norm = -jax.ops.segment_sum(jnp.where(fw_mask[:, None], rel_pos, jnp.zeros_like(rel_pos)), senders, num_segments=self.num_particles)
-        norms = jnp.linalg.norm(wall_norm, axis=1, keepdims=True)  
-        box_feats_norm = jnp.where(fluid_mask, 0.0, wall_norm / (norms + 1e-12))
-        box_sender_feats = jnp.concatenate([box_feats_norm[senders], box_feat[senders]], axis=-1)
+        # wall_norm = -jax.ops.segment_sum(jnp.where(fw_mask[:, None], rel_pos, jnp.zeros_like(rel_pos)), senders, num_segments=self.num_particles)
+        # norms = jnp.linalg.norm(wall_norm, axis=1, keepdims=True)  
+        # box_feats_norm = jnp.where(fluid_mask, 0.0, wall_norm / (norms + 1e-12))
+        box_sender_feats = jnp.concatenate([particle_type_embeddings[senders], box_feat[senders]], axis=-1)
         
         w = window_function_batched(features["rel_dist"][:, 0])
         a_fw = jnp.where(fw_mask, w, jnp.array(0.0, dtype=rel_pos.dtype))
