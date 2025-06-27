@@ -232,7 +232,7 @@ class MyParticleNetwork(BaseModel):
         feats = jnp.concatenate([hybrid, ans_d], axis=-1)
         
         # ascc
-        ans_f_ascc = self.conv0_fluid_ascc(fluid_feats[senders] + fluid_feats[receivers], receivers, rel_pos, a=a_ff)
+        ans_f_ascc = self.conv0_fluid_ascc(fluid_feats[senders], receivers, rel_pos, a=a_ff)
         ans_d_ascc = self.dense0_fluid_ascc(fluid_feats)
         ans_d_ascc = jnp.where(fluid_mask, ans_d_ascc, 0.0)
         obs_f_ascc = self.conv0_obstacle_ascc(box_sender_feats, receivers, rel_pos, a=a_fw)
@@ -254,7 +254,7 @@ class MyParticleNetwork(BaseModel):
             ans_cconv = ans_conv_cconv + ans_dense_cconv
             
             #ascc
-            ans_conv_ascc = conv_ascc(inp_feats[senders] + inp_feats[receivers], receivers, rel_pos, a=a_ff)
+            ans_conv_ascc = conv_ascc(inp_feats[senders], receivers, rel_pos, a=a_ff)
             ans_dense_ascc = dense_ascc(inp_feats)
             ans_dense_ascc = jnp.where(fluid_mask, ans_dense_ascc, 0.0)
 
@@ -275,4 +275,4 @@ class MyParticleNetwork(BaseModel):
         #     init=hk.initializers.Constant(1/109.37)
         # )
         #jax.debug.print("s={}", s)
-        return {"pos": pos2 + 1/128 * ans_convs[-1]}
+        return {"pos": pos2 + 1/128.0 * ans_convs[-1]}

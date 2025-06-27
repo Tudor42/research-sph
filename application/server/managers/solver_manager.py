@@ -25,9 +25,9 @@ class SolverManager:
             identifier = list(self.solvers)[identifier]
         self.curr_solver_name = identifier
         if self.curr_solver_name == "cconv":
-            self.model_cfg = get_model_cfg("ckp/cconv_dam2d_20250607-105606/best")
+            self.model_cfg = get_model_cfg("ckp/cconv_dam2d_20250627-012427/best")
         elif self.curr_solver_name == "gns":
-            self.model_cfg = get_model_cfg("ckp/gns_dam2d_20250530-145051/best")
+            self.model_cfg = get_model_cfg("ckp/gns_dam2d_20250607-003352/best")
         else:
             self.model_cfg = None
         self.is_solver_initialized = False
@@ -236,6 +236,7 @@ class SolverManager:
             )
             features["rel_dist"] = normalized_relative_distances[:, None]
             features["force"] = forces
+        features = jax.tree_util.tree_map(lambda f: f, features)
         return features, neighbors
 
 def get_model_cfg(ckp_directory):

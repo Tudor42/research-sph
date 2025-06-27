@@ -1,3 +1,4 @@
+from omegaconf import OmegaConf
 from jax_sph.utils import Tag
 from lagrangebench import models
 from lagrangebench.utils import NodeType
@@ -46,15 +47,18 @@ def create_model(case_manager, cfg, model_name, num_particles):
     hk.mixed_precision.set_policy(MODEL, policy)
     model_apply = jax.jit(model.apply)
     params, model_state, _, _ = load_haiku(load_ckp)
-    model_params = params["model"]
-    
+    if "model" in params:
+        model_params = params["model"]
+    else:
+        model_params = params
+
     neighbor_fn = partition.neighbor_list(
         case_manager.displacement_fn,
         case_manager.box_size,
         r_cutoff=default_connectivity_radius,
         backend=case_manager.cfg.nl.backend,
         capacity_multiplier=1.25,
-        mask_self=cfg.model.mask_self,
+        mask_self=cfg.model.get('mask_self', False),
         format=Sparse,
         num_particles_max=num_particles,
         num_partitions=case_manager.cfg.nl.num_partitions,
