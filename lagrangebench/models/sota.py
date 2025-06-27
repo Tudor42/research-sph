@@ -160,7 +160,7 @@ class MyParticleNetwork(BaseModel):
         # initial fluid/obstacle conv and dense
         self.conv0_fluid = ConvLayer(18, self.layer_channels[0])
         self.dense0_fluid = hk.Linear(output_size=self.layer_channels[0])
-        self.conv0_obstacle = ConvLayer(18, self.layer_channels[0])
+        self.conv0_obstacle = ConvLayer(20, self.layer_channels[0])
         
         self.convs = []
         self.denses = []
@@ -175,7 +175,7 @@ class MyParticleNetwork(BaseModel):
         self.aff_ascc = IAFF(channels=32, inter_channels=64, num_particles=num_particles, conv_type='ascc')
         self.conv0_fluid_ascc = ConvLayer(18, self.layer_channels[0], conv_type="ascc")
         self.dense0_fluid_ascc = hk.Linear(output_size=self.layer_channels[0])
-        self.conv0_obstacle_ascc = ConvLayer(18, self.layer_channels[0], conv_type="ascc")
+        self.conv0_obstacle_ascc = ConvLayer(20, self.layer_channels[0], conv_type="ascc")
 
         self.convs_ascc = []
         self.denses_ascc = []
@@ -221,11 +221,18 @@ class MyParticleNetwork(BaseModel):
   
         fw_mask = (particle_types[senders] != Tag.FLUID) & (particle_types[receivers] == Tag.FLUID) & (receivers != senders)
         ff_mask = (particle_types[senders] == Tag.FLUID) & (particle_types[receivers] == Tag.FLUID) & (receivers != senders)
-       
-        # wall_norm = -jax.ops.segment_sum(jnp.where(fw_mask[:, None], rel_pos, jnp.zeros_like(rel_pos)), senders, num_segments=self.num_particles)
-        # norms = jnp.linalg.norm(wall_norm, axis=1, keepdims=True)  
-        # box_feats_norm = jnp.where(fluid_mask, 0.0, wall_norm / (norms + 1e-12))
-        box_sender_feats = jnp.concatenate([particle_type_embeddings[senders], box_feat[senders]], axis=-1)
+        ww_mask = (particle_types[senders] != Tag.FLUID) & (particle_types[receivers] != Tag.FLUID) & (receivers != senders)
+
+        wall_norm = -jax.ops.segment_sum(jnp.where(fw_mask[:, None], rel_pos, jnp.zeros_like(rel_pos)), senders, num_segments=self.num_particles)
+        
+        normalized_rel_pos = rel_pos / (features["rel_dist"] + 1e-12)
+        normals = jnp.where(ww_mask[:, None], wall_norm[senders] - jnp.sum(normalized_rel_pos *  wall_norm[senders], axis=1)[:, None] * normalized_rel_pos, 0.0)
+        
+        wall_norm = jax.ops.segment_sum(normals, senders, num_segments=self.num_particles)
+        norms = jnp.linalg.norm(wall_norm, axis=1, keepdims=True)
+        box_feats_norm = jnp.where(fluid_mask, 0.0, wall_norm / (norms + 1e-12))
+
+        box_sender_feats = jnp.concatenate([particle_type_embeddings[senders], box_feats_norm[senders], box_feat[senders]], axis=-1)
         
         w = window_function_batched(features["rel_dist"][:, 0])
         a_fw = jnp.where(fw_mask, w, jnp.array(0.0, dtype=rel_pos.dtype))
