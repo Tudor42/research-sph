@@ -12,21 +12,26 @@ class CaseManager:
         self.cases = {
             "db": load_case("cases/", "db.py"),
             "ft2d": load_case("cases/", "ft2d.py"),
-            #"empty": load_case("cases/", "empty.py")
+            "empty": load_case("cases/", "db.py")
         }
     
     def list_names(self):
         return list(self.cases.keys())
     
-    def select(self, identifier):
+    def select(self, identifier, state=None):
         self.curr_case_name = identifier
         case = self.cases[identifier]
+        
         args = OmegaConf.create(dict(config=os.path.join("cases", identifier + ".yaml")))
+        if identifier == "empty":
+            args = OmegaConf.create(dict(config=os.path.join("cases", "db.yaml")))
+
         cfg = load_embedded_configs(args)
         if identifier == "db" or identifier == "ft2d":
             if not os.path.exists(os.path.join("sim_data", "relaxed", identifier, identifier + "_2_0.02_2.h5")):
                 _ = self.do_relaxation(case, cfg, identifier)
             cfg.state0_path=str(os.path.join("sim_data", "relaxed", identifier, identifier + "_2_0.02_2.h5"))
+        
         self._current = case(cfg)
         (
             self.cfg,
@@ -40,6 +45,8 @@ class CaseManager:
             self.displacement_fn,
             self.shift_fn,
         ) = self._current.initialize()
+        if state is not None:
+            self.state = state
 
     def do_relaxation(self, case, cfg, identifier):
         cfg = copy.deepcopy(cfg)

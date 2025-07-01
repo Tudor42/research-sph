@@ -85,14 +85,12 @@ class Window:
                 self.state_manager.select_case("ft2d")
                 self.mode = 'normal'
             elif e.key == 'e' and self.mode == 'select case':
-                self.state_manager.select_case("empty")
+                self.state_manager.select_case("empty", open_case_file())
                 self.mode = 'normal'
             elif e.key == ti.ui.SPACE and (self.mode == "normal"):
                 self.run_sim = not self.run_sim
             elif e.key == 'r' and (self.mode == "normal"):
                 self.state_manager.reset_scene()
-            elif e.key == 'o' and self.mode == "select case":
-                print(open_case_file())
             elif e.key == 'c' and self.mode == "normal":
                 self.gradient = not self.gradient
             elif e.key == 't' and self.mode == "normal":

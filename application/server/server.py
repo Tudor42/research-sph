@@ -34,7 +34,7 @@ def _process_command(sm, cmd):
         sm.reset_scene()
         return make_response(sm)
     if name == "select_case":
-        sm.select_case(cmd.get("case"))
+        sm.select_case(cmd.get("case"), cmd.get("state", None))
         return {"selected_case": sm.case_manager.curr_case_name, **make_response(sm)}
     if name == "select_solver":
         sm.select_solver(cmd.get("solver"))

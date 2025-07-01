@@ -42,8 +42,8 @@ class StateManagerImpl(StateManager):
     def get_velocities(self):
         return self.state["u"]
 
-    def select_case(self, case_name):
-        self.case_manager.select(case_name)
+    def select_case(self, case_name, state=None):
+        self.case_manager.select(case_name, state)
         self.solver_manager.is_solver_initialized = False
         self.set_dt()
         self.reset_scene()

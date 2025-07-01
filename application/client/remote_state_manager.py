@@ -66,8 +66,11 @@ class RemoteStateManager(StateManager):
     def solvers_names(self):
         return self.solvers
 
-    def select_case(self, case_name):
-        self._send_msg({'cmd': 'select_case', 'case': case_name})
+    def select_case(self, case_name, state=None):
+        if state is None:
+            self._send_msg({'cmd': 'select_case', 'case': case_name})
+        else:
+            self._send_msg({'cmd': 'select_case', 'case': case_name, 'state': state})
 
     def select_solver(self, solver_name):
         self._send_msg({'cmd': 'select_solver', 'solver': solver_name})

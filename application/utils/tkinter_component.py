@@ -4,15 +4,15 @@ from tkinter import filedialog
 from tkinter import messagebox
 
 from application.client.remote_state_manager import RemoteStateManager
+from jax_sph.io_state import read_h5
 
 def open_case_file():
     root = tk.Tk(); root.withdraw()
     path = filedialog.askopenfilename(
-        title="Open SPH case", filetypes=[("Python", "*.py"),("All","*.*")]
+        title="Open SPH case", filetypes=[("Python", "*.h5"),("All","*.*")]
     )
     root.destroy()
-    return path or None
-
+    return read_h5(path)
 
 def get_connection():
     root = tk.Tk()

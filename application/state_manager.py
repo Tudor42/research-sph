@@ -30,7 +30,7 @@ class StateManager(ABC):
         pass
 
     @abstractmethod
-    def select_case(self, case_name: str) -> None:
+    def select_case(self, case_name: str, state=None) -> None:
         """Switch to a different simulation case."""
         pass
 

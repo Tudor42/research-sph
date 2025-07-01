@@ -25,7 +25,7 @@ class SolverManager:
             identifier = list(self.solvers)[identifier]
         self.curr_solver_name = identifier
         if self.curr_solver_name == "cconv":
-            self.model_cfg = get_model_cfg("ckp/cconv_dam2d_20250628-212554/best")
+            self.model_cfg = get_model_cfg("ckp/cconv_dam2d_20250630-232100/best")
         elif self.curr_solver_name == "gns":
             self.model_cfg = get_model_cfg("ckp/gns_dam2d_20250607-003352/best")
         else:
@@ -176,13 +176,13 @@ class SolverManager:
         if model_name == "cconv":
             most_recent_positions = position_seq[:, -1]
             vel1 = displacement_fn_vmap(position_seq[:, -1], position_seq[:, -2]) / dt
-            vel2_candidate = vel1 #+ dt * forces
+            vel2_candidate = vel1 + dt * forces
             pos2_candidate = shift_fn(most_recent_positions, dt * (vel2_candidate + vel1) / 2.0)
 
             most_recent_position = jnp.where(non_kinematic_mask, pos2_candidate, most_recent_positions)
             neighbors = neighbors.update(
                 most_recent_position, num_particles=self.num_particles
-            )
+            )  
 
             features = {}
             features["abs_pos"] = most_recent_position[:, None]
